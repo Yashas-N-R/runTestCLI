@@ -39,6 +39,7 @@ def print_matches_preview(report: RunReport, console: Console | None = None) -> 
     table.add_column("Framework")
     table.add_column("File")
     table.add_column("Tags")
+    table.add_column("Why")
     for m in report.matches:
         table.add_row(
             f"{m.score:.2f}",
@@ -46,6 +47,7 @@ def print_matches_preview(report: RunReport, console: Console | None = None) -> 
             m.test.framework.value,
             f"{m.test.file_path}:{m.test.line or ''}",
             ", ".join(m.test.tags),
+            ", ".join(m.matched_on[:3]),
         )
     console.print(table)
 

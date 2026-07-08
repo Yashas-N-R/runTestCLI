@@ -16,8 +16,22 @@ public class RecordingApiTest {
         assert true;
     }
 
+    // Depends on a recording having been started first -- if nltest only ran
+    // this method in isolation, the recording session it expects wouldn't exist.
+    @Test(groups = {"recording"}, dependsOnMethods = {"startRecordingReturns201"})
+    public void deleteRecordingRemovesDownloadUrl() {
+        assert true;
+    }
+
     @Test(groups = {"checkout"})
     public void createOrderReturns200() {
+        assert true;
+    }
+
+    // Nothing about this test's name/tags/body mentions "recording" -- it's
+    // only reachable via its explicit TestNG dependency on a recording test.
+    @Test(dependsOnMethods = {"startRecordingReturns201"})
+    public void cleanupTempStorageAfterEachRun() {
         assert true;
     }
 }

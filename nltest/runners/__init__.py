@@ -19,8 +19,18 @@ FRAMEWORK_RUNNERS = {
 }
 
 
-def run_matches(matches: list[MatchResult], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
-    """Group matches by framework and execute each group with the appropriate runner."""
+def run_matches(
+    matches: list[MatchResult], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
+    """Group matches by framework and execute each group with the appropriate runner.
+
+    By default (`exact=False`, "safe mode"), runners execute at file/class
+    granularity rather than cherry-picking individual test IDs, so that
+    setup another (unselected) test in the same file/class performs -- shared
+    fixtures, `beforeEach` hooks, TestNG `dependsOnMethods`, ordering -- still
+    happens. Pass `exact=True` to only run the exact matched tests (faster,
+    but riskier for suites with inter-test dependencies).
+    """
     grouped = defaultdict(list)
     for m in matches:
         grouped[m.test.framework].append(m.test)
@@ -34,5 +44,5 @@ def run_matches(matches: list[MatchResult], repo_root: str, dry_run: bool = Fals
 
                 all_results.append(TR(test=t, status=Status.ERROR, message=f"No runner implemented for framework {framework}"))
             continue
-        all_results.extend(runner(tests, repo_root, dry_run=dry_run, extra_args=extra_args))
+        all_results.extend(runner(tests, repo_root, dry_run=dry_run, extra_args=extra_args, exact=exact))
     return all_results

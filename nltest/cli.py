@@ -9,7 +9,7 @@ import time
 from rich.console import Console
 
 from nltest.config import NLTestConfig
-from nltest.matcher import match_query
+from nltest.matcher import augment_matches, match_query, score_matches
 from nltest.models import RunReport
 from nltest.report import print_console_report, print_matches_preview, write_html_report, write_json_report
 from nltest.runners import run_matches
@@ -36,6 +36,18 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--extra-args", default="", help="Extra args forwarded verbatim to the underlying test runner")
     run_p.add_argument("--threshold", type=float, default=None, help="Override the match score threshold (0-1)")
     run_p.add_argument("--limit", type=int, default=None, help="Max number of matched tests to run")
+    run_p.add_argument(
+        "--exact",
+        action="store_true",
+        help="Run only the exact matched tests (by node ID/method) instead of the default safe mode, "
+        "which runs whole files/classes so shared setup, fixtures, and test dependencies still execute",
+    )
+    run_p.add_argument(
+        "--no-deps",
+        action="store_true",
+        help="Don't auto-include tests that a matched test explicitly depends on "
+        "(TestNG dependsOnMethods, pytest-dependency, # depends-on: comments)",
+    )
 
     index_p = sub.add_parser("index", help="Scan the repo and list all discovered test cases")
     index_p.add_argument("--tag", default=None, help="Only show tests with this tag")
@@ -111,21 +123,37 @@ def cmd_run(args: argparse.Namespace) -> int:
     config = NLTestConfig.load(args.repo)
     if args.threshold is not None:
         config.match_threshold = args.threshold
+    if args.no_deps:
+        config.include_dependencies = False
 
     console.print(f'[bold]Scanning repo:[/bold] {config.repo_root}')
     tests = scan_repo(config)
     console.print(f"[bold]Discovered {len(tests)} test case(s) across all supported frameworks.[/bold]")
 
-    matches = match_query(args.query, tests, config)
+    matches = score_matches(args.query, tests, config)
     if args.limit:
         matches = matches[: args.limit]
+    matches = augment_matches(args.query, matches, tests, config)
+
+    dependency_count = sum(1 for m in matches if any(r.startswith("dependency-of:") for r in m.matched_on))
 
     report = RunReport(query=args.query, matches=matches, dry_run=args.dry_run)
     print_matches_preview(report, console)
+    if dependency_count:
+        console.print(
+            f"[dim]({dependency_count} of the above were auto-included because a matched test depends on them; "
+            "pass --no-deps to disable)[/dim]"
+        )
+    if not args.exact:
+        console.print(
+            "[dim]Running in safe mode: whole files/classes will execute (not just the matched tests), "
+            "so shared setup/state isn't skipped. Pass --exact to run only the matched tests.[/dim]"
+        )
 
     if not matches:
         console.print("[yellow]Nothing to run.[/yellow] Try `nltest index` to see available tests, "
-                       "or `nltest list-tags` to see recognized tags.")
+                       "or `nltest list-tags` to see recognized tags. If the feature isn't referenced anywhere "
+                       "in test titles, tags, docstrings, or code, add a `feature_map` entry to .nltestrc.yml.")
         return 1
 
     if not args.dry_run and not args.yes:
@@ -134,7 +162,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             console.print("Aborted.")
             return 1
 
-    results = run_matches(matches, config.repo_root, dry_run=args.dry_run, extra_args=args.extra_args)
+    results = run_matches(matches, config.repo_root, dry_run=args.dry_run, extra_args=args.extra_args, exact=args.exact)
     report.results = results
     report.finished_at = time.time()
 

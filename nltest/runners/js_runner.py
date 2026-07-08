@@ -58,13 +58,20 @@ def _fallback_results(tests: list[TestCase], returncode: int, stdout: str, stder
     ]
 
 
-def run_playwright_js_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
+def run_playwright_js_tests(
+    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
     if not tests:
         return []
     files = sorted({t.file_path for t in tests})
-    names = [re.escape(t.name) for t in tests]
-    grep = "|".join(names)
-    cmd = ["npx", "playwright", "test", *files, "-g", grep, "--reporter=json"]
+    cmd = ["npx", "playwright", "test", *files, "--reporter=json"]
+    if exact:
+        # Fast but riskier: only runs the matched test titles. If tests in this
+        # file share state via `beforeEach`/prior `test()` blocks, running in
+        # isolation can behave differently than the full suite. Default (safe)
+        # mode runs the whole file(s) instead.
+        names = [re.escape(t.name) for t in tests]
+        cmd.extend(["-g", "|".join(names)])
     if extra_args:
         cmd.extend(extra_args.split())
 
@@ -113,16 +120,19 @@ def run_playwright_js_tests(tests: list[TestCase], repo_root: str, dry_run: bool
     return results
 
 
-def run_jest_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
+def run_jest_tests(
+    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
     if not tests:
         return []
     files = sorted({t.file_path for t in tests})
-    names = [re.escape(t.name) for t in tests]
-    pattern = "|".join(names)
 
     with tempfile.TemporaryDirectory() as tmp:
         out_file = os.path.join(tmp, "jest-report.json")
-        cmd = ["npx", "jest", *files, "-t", pattern, "--json", f"--outputFile={out_file}"]
+        cmd = ["npx", "jest", *files, "--json", f"--outputFile={out_file}"]
+        if exact:
+            names = [re.escape(t.name) for t in tests]
+            cmd.extend(["-t", "|".join(names)])
         if extra_args:
             cmd.extend(extra_args.split())
 
@@ -163,13 +173,16 @@ def run_jest_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False,
         return results
 
 
-def run_mocha_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
+def run_mocha_tests(
+    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
     if not tests:
         return []
     files = sorted({t.file_path for t in tests})
-    names = [re.escape(t.name) for t in tests]
-    grep = "|".join(names)
-    cmd = ["npx", "mocha", *files, "--grep", grep, "--reporter", "json"]
+    cmd = ["npx", "mocha", *files, "--reporter", "json"]
+    if exact:
+        names = [re.escape(t.name) for t in tests]
+        cmd.extend(["--grep", "|".join(names)])
     if extra_args:
         cmd.extend(extra_args.split())
 
@@ -213,7 +226,12 @@ _CY_PASS_RE = re.compile(r"✓\s+(.+?)\s*(?:\(\d+[a-z]*\))?\s*$")
 _CY_FAIL_RE = re.compile(r"^\s*\d+\)\s+(?:.*?\s+)?(.+)$")
 
 
-def run_cypress_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
+def run_cypress_tests(
+    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
+    # Cypress always runs the whole spec file (no built-in per-test grep), which
+    # is actually the safe behavior we want by default anyway: shared
+    # `beforeEach` state and prior `it()` blocks in the file still execute.
     if not tests:
         return []
     files = sorted({t.file_path for t in tests})

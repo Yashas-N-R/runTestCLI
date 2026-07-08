@@ -20,21 +20,29 @@ def _node_id(test: TestCase) -> str:
     return f"{test.file_path}::{test.name}"
 
 
-def build_command(tests: list[TestCase], junit_xml_path: str, extra_args: str = "") -> list[str]:
+def build_command(tests: list[TestCase], junit_xml_path: str, extra_args: str = "", exact: bool = False) -> list[str]:
     cmd = ["pytest", "-v", f"--junitxml={junit_xml_path}"]
     if extra_args:
         cmd.extend(shlex.split(extra_args))
-    cmd.extend(_node_id(t) for t in tests)
+    if exact:
+        cmd.extend(_node_id(t) for t in tests)
+    else:
+        # Safe mode: select whole files rather than individual node IDs, so
+        # module/class-scoped fixtures, ordering, and any shared state that
+        # other (unselected) tests in the same file set up still run.
+        cmd.extend(sorted({t.file_path for t in tests}))
     return cmd
 
 
-def run_pytest_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
+def run_pytest_tests(
+    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
     if not tests:
         return []
 
     with tempfile.TemporaryDirectory() as tmp:
         junit_path = os.path.join(tmp, "junit.xml")
-        cmd = build_command(tests, junit_path, extra_args)
+        cmd = build_command(tests, junit_path, extra_args, exact=exact)
 
         if dry_run:
             return [

@@ -86,6 +86,8 @@ nltest run "test recording" --dry-run          # show commands, run nothing
 nltest run "test recording" --json out.json --html out.html
 nltest run "test recording" --threshold 0.5    # be stricter about matches
 nltest run "test recording" --extra-args="-x"  # forwarded to the underlying runner
+nltest run "test recording" --exact            # only run matched tests, not whole files/classes
+nltest run "test recording" --no-deps          # don't auto-include declared dependencies
 nltest --repo /path/to/other/repo run "smoke test checkout"
 ```
 
@@ -123,6 +125,87 @@ public void startRecordingReturns201() {}
 
 Even *untagged* tests still match on their name, docstring/display name, and
 file path — tags simply make matching more precise.
+
+## "What if the feature isn't mentioned in the test title?"
+
+Matching doesn't just look at titles. It also searches:
+
+- **The test's source code (body)** — a Cypress test with no "recording" in
+  its title/tags will still match `"test recording"` if its body does
+  `cy.get('[data-testid=recording-toggle-button]')`.
+- **The docstring/`@DisplayName`**, even when the title itself is generic.
+- **The file/class name** (with lower weight, since being co-located in a
+  relevant file is a weaker signal than the test itself being about it).
+
+For the rare case where a feature is only referred to by an internal
+codename that appears *nowhere* in the test (title, tags, docstring, or
+code), add a manual override to `.nltestrc.yml`:
+
+```yaml
+feature_map:
+  recording:
+    - "tag:beacon_internal_codename"   # force-include tests with this tag
+    - "file:src/media/beacon"          # or living under this path
+    - "name:some_exact_test_name"      # or with this exact name
+```
+
+See it in action: `examples/sample-multistack-repo` has a test tagged only
+`beacon_internal_codename` that `nltest match "test recording"` still finds,
+purely via its `.nltestrc.yml` feature_map entry.
+
+## "What if a test has a dependency on another test?"
+
+Two separate problems, two separate mitigations:
+
+**1. Safe execution granularity (default).** Cherry-picking a single matched
+test by node ID/method name can skip setup that an *unselected* sibling test
+in the same file/class performs (shared `beforeEach` state, class-scoped
+fixtures, test ordering). By default, `nltest run` executes at **file/class
+granularity** — it runs the whole file (JS) or class (Java) the matched
+test(s) belong to, not just the matched test IDs — so that shared state and
+setup still happen exactly as they would in a full suite run. Only the
+originally matched tests are reported on. Pass `--exact` to instead run only
+the matched tests (faster, but riskier for suites with cross-test state).
+
+**2. Explicit dependency resolution.** When a test *declares* a dependency on
+another specific test, `nltest` resolves and auto-includes it even if the
+query wouldn't otherwise have matched it:
+
+- TestNG `dependsOnMethods = {...}` / `dependsOnGroups = {...}`
+- pytest's [pytest-dependency](https://pytest-dependency.readthedocs.io/)
+  convention: `@pytest.mark.dependency(name=...)` / `@pytest.mark.dependency(depends=[...])`
+- A universal `# depends-on: <test name>` / `// depends-on: <test name>`
+  comment for frameworks without a native mechanism (Cypress, Mocha, Jest,
+  Playwright, plain JUnit)
+
+Auto-included dependencies are shown separately in the console report and can
+be disabled with `--no-deps` if you're confident they aren't needed.
+
+```java
+// TestNG: deleteRecording depends on a recording having been started first.
+@Test(dependsOnMethods = {"startRecordingReturns201"})
+public void deleteRecordingRemovesDownloadUrl() { ... }
+```
+
+```python
+# pytest-dependency
+@pytest.mark.dependency(name="recording_started")
+def test_recording_can_be_started_for_share_test(): ...
+
+@pytest.mark.dependency(depends=["recording_started"])
+def test_share_button_opens_dialog(): ...
+```
+
+```javascript
+// Universal comment convention (any JS framework)
+// depends-on: shows a countdown before recording starts
+it("shows an error if storage is full while recording", () => { ... });
+```
+
+This won't catch *implicit* dependencies (tests that happen to rely on
+ordering/state without declaring it) — that's what safe-mode file/class
+execution is for. If your suite has cross-file dependencies, keep those
+tests' triggers in the same file/class, or declare them explicitly.
 
 ## Configuration
 

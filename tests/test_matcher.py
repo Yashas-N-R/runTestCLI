@@ -22,10 +22,55 @@ def test_query_test_recording_matches_only_recording_tests(all_tests):
 
     assert len(matches) >= 12
     for m in matches:
-        assert "recording" in m.test.tags or "recording" in m.test.name.lower() or "recording" in m.test.description.lower()
+        if any(r.startswith("feature_map:") for r in m.matched_on):
+            continue  # deliberately has no "recording" anywhere -- that's the point of feature_map
+        assert any("recording" in field for field in (m.test.searchable_text().lower(), m.test.body.lower()))
 
     assert not any("login" in n.lower() for n in names)
     assert not any("checkout" in n.lower() for n in names)
+
+
+def test_body_content_match_finds_untitled_recording_test(all_tests):
+    """A test whose title/tags/docstring never say 'recording' but whose code
+    does (e.g. `cy.get('[data-testid=recording-toggle-button]')`) should still
+    be found via body-content matching."""
+    config, tests = all_tests
+    matches = match_query("test recording", tests, config)
+    names = {m.test.name for m in matches}
+    assert "renders the correct button icon" in names
+
+
+def test_feature_map_finds_internally_codenamed_test(all_tests):
+    """A test that only ever refers to an internal codename ("beacon") should
+    still be found via the .nltestrc.yml feature_map override."""
+    config, tests = all_tests
+    matches = match_query("test recording", tests, config)
+    names = {m.test.name for m in matches}
+    assert "test_beacon_pipeline_emits_heartbeat" in names
+    beacon_match = next(m for m in matches if m.test.name == "test_beacon_pipeline_emits_heartbeat")
+    assert any(r.startswith("feature_map:") for r in beacon_match.matched_on)
+
+
+def test_dependency_auto_included_for_testng(all_tests):
+    """A TestNG test with dependsOnMethods should pull in its dependency even
+    though the dependency ("startRecordingReturns201") isn't independently
+    matched by this query -- the query only matches the downstream test
+    ("cleanupTempStorageAfterEachRun"), which never mentions "recording"."""
+    config, tests = all_tests
+    matches = match_query("cleanup temp storage", tests, config)
+    names = {m.test.name for m in matches}
+    assert names == {"cleanupTempStorageAfterEachRun", "startRecordingReturns201"}
+    dep_match = next(m for m in matches if m.test.name == "startRecordingReturns201")
+    assert any(r.startswith("dependency-of:") for r in dep_match.matched_on)
+
+
+def test_dependency_auto_included_for_pytest_dependency_marker(all_tests):
+    """pytest-dependency's `depends=[...]` should pull in the named setup test."""
+    config, tests = all_tests
+    matches = match_query("share button dialog", tests, config)
+    names = {m.test.name for m in matches}
+    assert "test_share_button_opens_dialog" in names
+    assert "test_recording_can_be_started_for_share_test" in names
 
 
 def test_query_matches_across_every_stack(all_tests):

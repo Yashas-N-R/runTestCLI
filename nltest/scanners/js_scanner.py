@@ -25,6 +25,25 @@ DESCRIBE_RE = re.compile(
 )
 TAG_ANNOTATION_RE = re.compile(r"@(?P<tag>[a-zA-Z][\w-]*)")
 TAG_COMMENT_RE = re.compile(r"//\s*tags?:\s*(.+)$", re.IGNORECASE)
+DEPENDS_COMMENT_RE = re.compile(r"//\s*depends-on:\s*(.+)$", re.IGNORECASE)
+
+
+def _extract_braced_body(source: str, from_offset: int, max_len: int = 4000) -> str:
+    """Best-effort: find the first `{` at/after `from_offset` and return the
+    text up to its matching `}` (used to grab a test's callback body for
+    content-based NL matching)."""
+    start = source.find("{", from_offset)
+    if start == -1:
+        return ""
+    depth = 0
+    for i in range(start, min(len(source), start + max_len)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : i + 1]
+    return source[start : start + max_len]
 
 
 def _detect_stack_and_framework(path: str, source: str) -> tuple[Stack, Framework]:
@@ -63,6 +82,25 @@ def _tags_near(lines: list[str], lineno: int, title: str) -> list[str]:
             continue
         break
     return tags
+
+
+def _depends_near(lines: list[str], lineno: int) -> list[str]:
+    depends: list[str] = []
+    idx = lineno - 2
+    while idx >= 0:
+        line = lines[idx].strip()
+        if not line:
+            break
+        m = DEPENDS_COMMENT_RE.search(line)
+        if m:
+            depends.extend(t.strip() for t in m.group(1).split(",") if t.strip())
+            idx -= 1
+            continue
+        if line.startswith("//"):
+            idx -= 1
+            continue
+        break
+    return depends
 
 
 def scan_js(config: NLTestConfig) -> list[TestCase]:
@@ -108,6 +146,8 @@ def scan_js(config: NLTestConfig) -> list[TestCase]:
             lineno = _line_number(source, m.start())
             class_name = nearest_describe(m.start())
             tags = _tags_near(lines, lineno, title)
+            depends_on = _depends_near(lines, lineno)
+            body = _extract_braced_body(source, m.end())
             test_id = f"{rel_path}::{class_name + ' > ' if class_name else ''}{title}"
             tests.append(
                 TestCase(
@@ -120,6 +160,8 @@ def scan_js(config: NLTestConfig) -> list[TestCase]:
                     line=lineno,
                     tags=sorted(set(tags)),
                     description=title,
+                    body=body,
+                    depends_on=depends_on,
                     language="javascript" if path.endswith((".js", ".jsx", ".mjs", ".cjs")) else "typescript",
                 )
             )

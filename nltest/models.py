@@ -56,6 +56,20 @@ class TestCase:
     description: str = ""
     """Docstring / display name / free text used for NL matching."""
 
+    body: str = ""
+    """Raw source text of the test body. Used as a fallback for NL matching
+    when the test's title/tags/docstring don't mention the feature under
+    test, but the code itself does (e.g. `recorder.start()`, `RecordingPage`)."""
+
+    depends_on: list[str] = field(default_factory=list)
+    """Names of other tests this one depends on (explicit framework dependency
+    annotations, e.g. TestNG `dependsOnMethods`, pytest-dependency `depends=[...]`,
+    or a `# depends-on:` / `// depends-on:` comment)."""
+
+    dependency_name: str | None = None
+    """This test's own registered dependency name, if any (e.g. pytest-dependency's
+    `@pytest.mark.dependency(name=...)`), used to resolve other tests' depends_on."""
+
     language: str = "unknown"
 
     def searchable_text(self) -> str:

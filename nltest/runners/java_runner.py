@@ -47,12 +47,26 @@ def _short_class(class_name: str | None) -> str:
     return class_name.rsplit(".", 1)[-1]
 
 
-def build_command(tool: str, repo_root: str, tests: list[TestCase]) -> list[str]:
-    selectors = sorted({f"{_short_class(t.class_name)}#{t.name}" for t in tests})
+def build_command(tool: str, repo_root: str, tests: list[TestCase], exact: bool = False) -> list[str]:
+    if exact:
+        # Fast but riskier: only the matched methods run. If one depends on
+        # shared class-level state/ordering that another (unselected) method
+        # in the class sets up, isolating it can behave differently.
+        selectors = sorted({f"{_short_class(t.class_name)}#{t.name}" for t in tests})
+    else:
+        # Safe mode (default): run the whole class(es) the matched methods
+        # belong to, so TestNG dependsOnMethods/dependsOnGroups, @Before*
+        # hooks, and any shared instance state still execute as normal.
+        selectors = sorted({_short_class(t.class_name) for t in tests})
+
     if tool == "maven":
         mvn = "./mvnw" if os.path.exists(os.path.join(repo_root, "mvnw")) else "mvn"
         return [mvn, "test", f"-Dtest={','.join(selectors)}", "-DfailIfNoTests=false"]
-    gradle_selectors = sorted({f"{_short_class(t.class_name)}.{t.name}" for t in tests})
+
+    if exact:
+        gradle_selectors = sorted({f"{_short_class(t.class_name)}.{t.name}" for t in tests})
+    else:
+        gradle_selectors = selectors
     gradlew = "./gradlew" if os.path.exists(os.path.join(repo_root, "gradlew")) else "gradle"
     cmd = [gradlew, "test"]
     for sel in gradle_selectors:
@@ -60,8 +74,8 @@ def build_command(tool: str, repo_root: str, tests: list[TestCase]) -> list[str]
     return cmd
 
 
-def _run_group(tests: list[TestCase], project_root: str, tool: str, dry_run: bool, extra_args: str) -> list[TestResult]:
-    cmd = build_command(tool, project_root, tests)
+def _run_group(tests: list[TestCase], project_root: str, tool: str, dry_run: bool, extra_args: str, exact: bool) -> list[TestResult]:
+    cmd = build_command(tool, project_root, tests, exact=exact)
     if extra_args:
         cmd.extend(extra_args.split())
 
@@ -112,7 +126,9 @@ def _run_group(tests: list[TestCase], project_root: str, tool: str, dry_run: boo
     return results
 
 
-def run_java_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "") -> list[TestResult]:
+def run_java_tests(
+    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+) -> list[TestResult]:
     if not tests:
         return []
 
@@ -134,5 +150,5 @@ def run_java_tests(tests: list[TestCase], repo_root: str, dry_run: bool = False,
                 for t in group_tests
             )
             continue
-        results.extend(_run_group(group_tests, project_root, tool, dry_run, extra_args))
+        results.extend(_run_group(group_tests, project_root, tool, dry_run, extra_args, exact))
     return results

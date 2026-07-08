@@ -56,6 +56,29 @@ class NLTestConfig:
     run_overrides: dict[str, str] = field(default_factory=dict)
     """Framework name -> shell command template override."""
 
+    search_body: bool = True
+    """Also match against test source code (not just title/tags/docstring).
+    Turn off for very large repos if scanning/matching becomes slow."""
+
+    include_dependencies: bool = True
+    """Automatically pull in tests that a matched test explicitly depends on
+    (TestNG dependsOnMethods/dependsOnGroups, pytest-dependency, or a
+    `# depends-on:` / `// depends-on:` comment), so isolated runs don't skip
+    required setup steps."""
+
+    feature_map: dict[str, list[str]] = field(default_factory=dict)
+    """Manual escape hatch for phrases that scanning/matching can't infer on
+    their own. Maps a phrase (matched as a substring/fuzzy match against the
+    query) to a list of selectors: tags, exact test names, or substrings of
+    the file path. Any test matching a selector is force-included.
+
+    Example:
+        feature_map:
+          "video capture":
+            - "tag:recording"
+            - "file:src/media/"
+    """
+
     @classmethod
     def load(cls, repo_root: str) -> "NLTestConfig":
         cfg = cls(repo_root=os.path.abspath(repo_root))
@@ -83,3 +106,10 @@ class NLTestConfig:
             self.max_matches = int(data["max_matches"])
         if "run_overrides" in data:
             self.run_overrides.update(data["run_overrides"])
+        if "search_body" in data:
+            self.search_body = bool(data["search_body"])
+        if "include_dependencies" in data:
+            self.include_dependencies = bool(data["include_dependencies"])
+        if "feature_map" in data:
+            for phrase, selectors in data["feature_map"].items():
+                self.feature_map[phrase] = list(selectors)

@@ -22,3 +22,10 @@ match_threshold: 0.35
 
 # Cap on how many matched tests a single `nltest run` will execute.
 max_matches: 200
+
+# Manual escape hatch: force-include tests that automatic scanning/matching
+# can't infer on its own (e.g. the feature is only referred to by an internal
+# codename in the test, never the word a PM/QA would actually say).
+feature_map:
+  recording:
+    - "tag:beacon_internal_codename"
