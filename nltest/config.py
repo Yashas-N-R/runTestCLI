@@ -28,13 +28,17 @@ DEFAULT_EXCLUDE_DIRS = {
 # Built-in synonym map: NL words -> canonical keywords that may appear as tags,
 # test names, or descriptions. Repo configs can extend/override this.
 DEFAULT_SYNONYMS: dict[str, list[str]] = {
-    "recording": ["record", "recorder", "capture", "screen-record"],
+    # Deliberately does NOT include the bare word "record" -- it's too
+    # ambiguous (a video *recording* vs. a database *record*/employment
+    # *record*) and caused false positives against unrelated "employee
+    # record"-style features in practice.
+    "recording": ["recorder", "capture", "screen-record", "screen-recording"],
     "login": ["signin", "sign-in", "auth", "authentication", "logon"],
     "logout": ["signout", "sign-out"],
     "checkout": ["payment", "purchase", "order"],
     "cart": ["basket", "shopping-cart"],
     "search": ["find", "query", "lookup"],
-    "upload": ["import", "attach"],
+    "upload": ["attach"],
     "download": ["export"],
     "signup": ["register", "registration", "sign-up"],
     "profile": ["account", "settings", "preferences"],
@@ -42,6 +46,12 @@ DEFAULT_SYNONYMS: dict[str, list[str]] = {
     "api": ["rest", "endpoint", "service"],
     "smoke": ["sanity"],
     "regression": ["full", "complete"],
+    "import": ["bulk-import", "csv-import", "ingest"],
+    "export": ["download", "extract"],
+    "save": ["create", "persist", "submit", "add", "store"],
+    "delete": ["remove", "destroy"],
+    "update": ["edit", "modify", "change"],
+    "employment": ["employee", "employment-record", "hr-record"],
 }
 
 

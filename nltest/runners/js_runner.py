@@ -30,9 +30,10 @@ def _which(cmd: str) -> bool:
     return which(cmd) is not None
 
 
-def _run(cmd: list[str], cwd: str, timeout: int = 1800) -> tuple[int, str, str]:
+def _run(cmd: list[str], cwd: str, env: dict[str, str] | None = None, timeout: int = 1800) -> tuple[int, str, str]:
+    run_env = {**os.environ, **env} if env else None
     try:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=run_env)
         return proc.returncode, proc.stdout, proc.stderr
     except FileNotFoundError as exc:
         return 127, "", str(exc)
@@ -40,8 +41,10 @@ def _run(cmd: list[str], cwd: str, timeout: int = 1800) -> tuple[int, str, str]:
         return 124, "", f"timed out after {timeout}s"
 
 
-def _dry_run_results(tests: list[TestCase], cmd: list[str]) -> list[TestResult]:
-    return [TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run] {' '.join(cmd)}") for t in tests]
+def _dry_run_results(tests: list[TestCase], cmd: list[str], env: dict[str, str] | None = None) -> list[TestResult]:
+    env_prefix = " ".join(f"{k}={v}" for k, v in (env or {}).items())
+    shown_cmd = f"{env_prefix} {' '.join(cmd)}".strip()
+    return [TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run] {shown_cmd}") for t in tests]
 
 
 def _fallback_results(tests: list[TestCase], returncode: int, stdout: str, stderr: str, duration: float) -> list[TestResult]:
@@ -59,7 +62,12 @@ def _fallback_results(tests: list[TestCase], returncode: int, stdout: str, stder
 
 
 def run_playwright_js_tests(
-    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    tests: list[TestCase],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     if not tests:
         return []
@@ -76,10 +84,10 @@ def run_playwright_js_tests(
         cmd.extend(extra_args.split())
 
     if dry_run:
-        return _dry_run_results(tests, cmd)
+        return _dry_run_results(tests, cmd, env)
 
     start = time.time()
-    returncode, stdout, stderr = _run(cmd, repo_root)
+    returncode, stdout, stderr = _run(cmd, repo_root, env=env)
     duration = time.time() - start
 
     try:
@@ -121,7 +129,12 @@ def run_playwright_js_tests(
 
 
 def run_jest_tests(
-    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    tests: list[TestCase],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     if not tests:
         return []
@@ -137,10 +150,10 @@ def run_jest_tests(
             cmd.extend(extra_args.split())
 
         if dry_run:
-            return _dry_run_results(tests, cmd)
+            return _dry_run_results(tests, cmd, env)
 
         start = time.time()
-        returncode, stdout, stderr = _run(cmd, repo_root)
+        returncode, stdout, stderr = _run(cmd, repo_root, env=env)
         duration = time.time() - start
 
         if not os.path.exists(out_file):
@@ -174,7 +187,12 @@ def run_jest_tests(
 
 
 def run_mocha_tests(
-    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    tests: list[TestCase],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     if not tests:
         return []
@@ -187,10 +205,10 @@ def run_mocha_tests(
         cmd.extend(extra_args.split())
 
     if dry_run:
-        return _dry_run_results(tests, cmd)
+        return _dry_run_results(tests, cmd, env)
 
     start = time.time()
-    returncode, stdout, stderr = _run(cmd, repo_root)
+    returncode, stdout, stderr = _run(cmd, repo_root, env=env)
     duration = time.time() - start
 
     try:
@@ -227,7 +245,12 @@ _CY_FAIL_RE = re.compile(r"^\s*\d+\)\s+(?:.*?\s+)?(.+)$")
 
 
 def run_cypress_tests(
-    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    tests: list[TestCase],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     # Cypress always runs the whole spec file (no built-in per-test grep), which
     # is actually the safe behavior we want by default anyway: shared
@@ -240,10 +263,10 @@ def run_cypress_tests(
         cmd.extend(extra_args.split())
 
     if dry_run:
-        return _dry_run_results(tests, cmd)
+        return _dry_run_results(tests, cmd, env)
 
     start = time.time()
-    returncode, stdout, stderr = _run(cmd, repo_root)
+    returncode, stdout, stderr = _run(cmd, repo_root, env=env)
     duration = time.time() - start
 
     passed_titles = set(m.group(1).strip() for m in _CY_PASS_RE.finditer(stdout))

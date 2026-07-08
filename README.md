@@ -127,6 +127,88 @@ public void startRecordingReturns201() {}
 Even *untagged* tests still match on their name, docstring/display name, and
 file path — tags simply make matching more precise.
 
+## Understanding compound scenarios, not just keywords
+
+A query like
+
+```bash
+nltest run "test save employment after importing"
+```
+
+isn't fuzzy-matched as one bag of words `{save, employment, after, importing}`.
+`nltest` parses it into **two distinct scenarios with an explicit run
+order** — "importing" (a prerequisite) and "save employment" (what's
+actually being tested) — resolves each independently, and runs them in that
+order (`-- stage: prerequisite: importing --` then `-- stage: main: test
+save employment --`). Recognized connectors: `after`, `once`, `following`,
+`before`, `then`, `and then`, `followed by`, `prior to`, `subsequent to`,
+`given that`, `assuming`.
+
+Verb forms are understood too — `"after importing"` matches a test tagged
+`import` (not just the literal word "importing"), `"once saving succeeds"`
+matches one tagged `save`, etc.
+
+**When a scenario has no corresponding test case, nltest says so and asks
+what to do**, instead of silently guessing:
+
+```
+No test case found for the prerequisite step: "importing".
+  How should nltest handle "importing"?
+    [s] I already did this manually -- skip it
+    [t] Use a specific tag or exact test name for this step
+    [a] Abort
+  >
+```
+
+- **`[s]`** — treats that step as already satisfied and proceeds to resolve
+  the remaining scenario(s) on their own.
+- **`[t]`** — lets you point nltest at a specific tag or test name to stand
+  in for that step.
+- **`[a]`** — aborts the run.
+
+This also handles the "only a full-fledged combined case exists" situation:
+if the *only* test covering "importing" also covers "save employment" (a
+single composite test doing both), nltest tells you that explicitly —
+
+```
+No DEDICATED test case found for the prerequisite step: "importing" -- it
+only appears as part of a combined case (test_import_and_save_employment_full_flow)
+that also covers another part of this request.
+  How should nltest handle "importing"?
+    [s] I already did this manually -- skip it
+    [t] Use a specific tag or exact test name for this step
+    [u] Use the combined case as-is (run it in full)
+    [a] Abort
+  >
+```
+
+— and if you say `[s]`, it looks for a `# step: <name>` marker with a
+detected skip-env-var convention (see below) inside that composite test and,
+if found, runs it with that env var set to bypass just the import portion,
+rather than either re-running the whole thing from scratch or refusing to
+help:
+
+```python
+def test_import_and_save_employment_full_flow():
+    # step: import (skippable via NLTEST_SKIP_IMPORT)
+    if not os.environ.get("NLTEST_SKIP_IMPORT"):
+        import_employment_csv()
+    # step: save
+    save_new_employment_record()
+```
+
+```bash
+$ nltest run "test save employment after importing"
+...
+  "test_import_and_save_employment_full_flow" also performs the "importing"
+  step you skipped -- running it with NLTEST_SKIP_IMPORT=1 to bypass that part.
+```
+
+If no such convention is detected, nltest says so plainly rather than
+pretending it sliced the test — most frameworks execute a test
+method/function atomically, so isolating an arbitrary code region at runtime
+generally isn't possible without the test itself supporting it.
+
 ## "What if the feature isn't mentioned in the test title?"
 
 Matching doesn't just look at titles. It searches everything nltest can find
@@ -319,13 +401,16 @@ nltest/
   config.py        # .nltestrc.yml loading + defaults (synonyms, thresholds, excludes, feature_map)
   models.py        # TestCase, MatchResult, TestResult, RunReport
   ci_order.py      # reads CI pipeline YAML to stage/order execution (smoke before regression, etc.)
+  scenario.py      # compound-query resolution: clauses, missing-step prompts, composite-test skip logic
+  steps.py         # `# step: <name>` marker + skip-env-var convention detection within a test's body
   scanners/        # repo -> TestCase[] per language/framework
     python_scanner.py   # pytest / Selenium(py) / Playwright(py), via ast
     js_scanner.py        # Playwright(js) / Cypress / Jest / Mocha, via regex
     java_scanner.py      # JUnit / TestNG / Selenium / REST Assured, via regex
     context.py            # shared: file-level comments + locally-imported helper file content
   matcher/         # NL query -> ranked TestCase[]
-    nlp.py               # tokenization, concept/synonym grouping, fuzzy scoring
+    nlp.py               # tokenization, concept/synonym grouping, gerund normalization, fuzzy scoring
+    intent.py             # compound-query decomposition into ordered clauses (after/before/then)
     dependencies.py       # resolves TestNG/pytest-dependency/comment-based test dependencies
   runners/         # TestCase[] -> shell command -> TestResult[]
     pytest_runner.py

@@ -20,7 +20,12 @@ FRAMEWORK_RUNNERS = {
 
 
 def run_matches(
-    matches: list[MatchResult], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    matches: list[MatchResult],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     """Group matches by framework and execute each group with the appropriate runner.
 
@@ -30,6 +35,10 @@ def run_matches(
     fixtures, `beforeEach` hooks, TestNG `dependsOnMethods`, ordering -- still
     happens. Pass `exact=True` to only run the exact matched tests (faster,
     but riskier for suites with inter-test dependencies).
+
+    `env` sets extra environment variables for the subprocess(es) invoked --
+    used e.g. to bypass a step inside a composite test via a detected
+    skip-env-var convention (see `nltest/steps.py` and `nltest/scenario.py`).
     """
     grouped = defaultdict(list)
     for m in matches:
@@ -44,5 +53,5 @@ def run_matches(
 
                 all_results.append(TR(test=t, status=Status.ERROR, message=f"No runner implemented for framework {framework}"))
             continue
-        all_results.extend(runner(tests, repo_root, dry_run=dry_run, extra_args=extra_args, exact=exact))
+        all_results.extend(runner(tests, repo_root, dry_run=dry_run, extra_args=extra_args, exact=exact, env=env))
     return all_results

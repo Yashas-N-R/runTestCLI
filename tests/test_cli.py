@@ -42,3 +42,30 @@ def test_cli_run_dry_run_writes_json_report(tmp_path, capsys):
 def test_cli_run_no_matches_exits_nonzero(capsys):
     rc = main(["--repo", FIXTURE_REPO, "run", "the flux capacitor", "--dry-run"])
     assert rc == 1
+
+
+def test_cli_run_compound_query_dry_run(tmp_path, capsys):
+    """Compound query with dedicated cases for both parts should resolve
+    without needing any interactive prompt (no stdin should be touched)."""
+    json_path = str(tmp_path / "report.json")
+    rc = main(
+        [
+            "--repo",
+            FIXTURE_REPO,
+            "run",
+            "test save employment after importing",
+            "--dry-run",
+            "--json",
+            json_path,
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2 scenario(s)" in out
+    assert "stage: prerequisite: importing" in out
+    assert "stage: main: test save employment" in out
+    with open(json_path) as fh:
+        data = json.load(fh)
+    names = {r["name"] for r in data["results"]}
+    assert "test_import_employment_csv" in names
+    assert "test_save_new_employment_record" in names

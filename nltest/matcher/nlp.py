@@ -8,6 +8,7 @@ camelCase/snake_case/kebab-case test identifiers, and domain synonyms.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz
 
@@ -65,8 +66,26 @@ def _singularize(word: str) -> str:
     return word
 
 
+def _degerund_variants(word: str) -> set[str]:
+    """For a gerund/present-participle like "importing" or "saving", produce
+    candidate verb-stem forms ("import", "save") so a query like "after
+    importing" matches a test/tag written as "import". Purely additive --
+    the original word is always kept as a token too -- so this never removes
+    a match, only adds recall for verb-form phrasing."""
+    if not word.endswith("ing") or len(word) < 6:
+        return set()
+    stem = word[:-3]
+    variants = {stem}
+    if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+        variants.add(stem[:-1])  # "running" -> "runn" -> "run"
+    variants.add(stem + "e")  # "saving" -> "sav" -> "save"
+    return {v for v in variants if len(v) >= 3}
+
+
 def tokenize(text: str, drop_stopwords: bool = True) -> list[str]:
-    """Tokenize free text (query or identifiers) into normalized lowercase words."""
+    """Tokenize free text (query or identifiers) into normalized lowercase words
+    (one token per input word -- see `word_variants` for morphological
+    (gerund/plural) alternatives of an individual token)."""
     raw_words = WORD_RE.findall(text)
     tokens: list[str] = []
     for w in raw_words:
@@ -79,6 +98,14 @@ def tokenize(text: str, drop_stopwords: bool = True) -> list[str]:
     return tokens
 
 
+def word_variants(word: str) -> set[str]:
+    """Morphological alternative forms of a single already-normalized token,
+    e.g. "importing" -> {"importing", "import"}. Used both to expand a
+    query concept's own group (so "after importing" matches a test/tag
+    written as "import") and to enrich field-side token sets symmetrically."""
+    return {word} | _degerund_variants(word)
+
+
 def expand_query_tokens(tokens: list[str], synonyms: dict[str, list[str]]) -> set[str]:
     """Expand query tokens with configured synonyms in both directions.
 
@@ -87,31 +114,52 @@ def expand_query_tokens(tokens: list[str], synonyms: dict[str, list[str]]) -> se
     alternatives for a single concept, not additional required tokens.
     """
     expanded = set(tokens)
-    for group in group_query_concepts(tokens, synonyms):
-        expanded.update(group)
+    for concept in group_query_concepts(tokens, synonyms):
+        expanded.update(concept.all_variants())
     return expanded
 
 
-def group_query_concepts(tokens: list[str], synonyms: dict[str, list[str]]) -> list[set[str]]:
+@dataclass
+class Concept:
+    """One distinct word/idea from the query, split into two confidence
+    tiers so ambiguous automatic derivations don't carry the same weight as
+    the word the user actually typed (or an explicitly configured synonym).
+    """
+
+    strong: set[str]
+    """The literal token plus any explicitly configured synonyms -- high
+    confidence, e.g. "recording" and (if configured) "capture"."""
+
+    weak: set[str] = field(default_factory=set)
+    """Automatically derived morphological variants only (e.g. "recording"
+    -> "record") -- lower confidence, since e.g. "record" is also an
+    ordinary noun ("employment record") unrelated to video recording."""
+
+    def all_variants(self) -> set[str]:
+        return self.strong | self.weak
+
+
+def group_query_concepts(tokens: list[str], synonyms: dict[str, list[str]]) -> list[Concept]:
     """Group each distinct query token with its synonym alternatives.
 
-    Each returned set represents ONE concept the user mentioned (e.g.
-    "recording" -> {"recording", "record", "recorder", "capture", ...}); a
-    field only needs to contain ONE token from a concept's set to satisfy
-    that concept, but (for multi-word queries) should ideally satisfy EVERY
-    concept group to get full credit.
+    Each returned Concept represents ONE idea the user mentioned; a field
+    only needs to contain one variant to satisfy it, but strong-tier
+    variants (the literal word / configured synonyms) count for full credit
+    while weak-tier (automatically derived, e.g. gerund-stripped) variants
+    count for partial credit -- see `score_test`.
     """
-    groups: list[set[str]] = []
+    concepts: list[Concept] = []
     for token in tokens:
-        group = {token}
+        strong = {token}
+        weak = word_variants(token) - {token}
         for canonical, variants in synonyms.items():
             canonical_norm = _singularize(canonical.lower())
             normalized_variants = {_singularize(v.lower()) for v in variants}
-            if token == canonical_norm or token in normalized_variants:
-                group.add(canonical_norm)
-                group.update(normalized_variants)
-        groups.append(group)
-    return groups
+            configured = {canonical_norm} | normalized_variants
+            if (strong | weak) & configured:
+                strong.update(configured)
+        concepts.append(Concept(strong=strong, weak=weak - strong))
+    return concepts
 
 
 FIELD_WEIGHTS: dict[str, float] = {
@@ -135,7 +183,11 @@ because it's noisier, but it's what lets a query like "test recording" match
 a test that calls `recorder.start()` even though its title/tags never say
 the word "recording"."""
 
-FUZZY_MATCH_THRESHOLD = 85
+FUZZY_MATCH_THRESHOLD = 90
+"""Deliberately strict: short/common-word pairs like "record"/"recorder"
+score ~86 on rapidfuzz's ratio despite meaning different things (a verb root
+vs. an unrelated noun elsewhere), so the threshold needs to sit above that to
+avoid false positives while still catching genuine near-misses/typos."""
 FUZZY_MATCH_CREDIT = 0.8
 
 
@@ -163,18 +215,45 @@ def _field_tokens(test: TestCase, field_name: str) -> set[str]:
         text = test.file_context
     else:
         text = ""
-    return set(tokenize(text, drop_stopwords=(field_name in ("body", "file_context"))))
+    base_tokens = tokenize(text, drop_stopwords=(field_name in ("body", "file_context")))
+    enriched: set[str] = set()
+    for token in base_tokens:
+        enriched.update(word_variants(token))
+    return enriched
 
 
-def _concept_credit(concept: set[str], field_tokens: set[str]) -> tuple[float, str | None]:
-    """Best credit for ONE query concept (a token + its synonyms) against a
-    field's tokens: 1.0 for an exact match, partial credit for a close fuzzy
-    match, else 0."""
+WEAK_MATCH_CREDIT = 0.2
+"""Credit for a concept matching only via an automatically-derived weak
+variant (e.g. "recording" -> "record") that ISN'T also tied to a configured
+synonym. Deliberately low: these are often genuinely ambiguous (e.g.
+"record" the verb-root vs. "record" the ordinary noun, as in "employment
+record"). In practice this tier rarely matters -- a gerund like "importing"
+or "saving" whose stem ("import"/"save") is a configured synonym key gets
+promoted to a full-credit strong match instead (see `group_query_concepts`);
+this only covers stems with no such configured relationship."""
+
+
+def _concept_credit(concept: Concept, field_tokens: set[str]) -> tuple[float, str | None]:
+    """Best credit for ONE query concept against a field's tokens: 1.0 for an
+    exact match on the literal word/configured synonym, `WEAK_MATCH_CREDIT`
+    for a match only via an automatically-derived variant, or partial credit
+    for a close fuzzy match -- whichever is highest."""
+    if concept.strong & field_tokens:
+        return 1.0, next(iter(concept.strong & field_tokens))
+
     best_credit = 0.0
     best_reason = None
-    for variant in concept:
-        if variant in field_tokens:
-            return 1.0, variant
+    if concept.weak & field_tokens:
+        best_credit = WEAK_MATCH_CREDIT
+        best_reason = next(iter(concept.weak & field_tokens))
+
+    # Fuzzy matching is deliberately restricted to STRONG variants only (the
+    # literal query word / configured synonyms), not automatically-derived
+    # weak ones -- otherwise a weak variant that's itself an uncertain guess
+    # (e.g. "recording" -> "recorde", a guess for "record"+"e") can fuzzy-
+    # match its way to a false high-confidence hit, compounding uncertainty
+    # rather than bounding it.
+    for variant in concept.strong:
         for ft in field_tokens:
             ratio = fuzz.ratio(variant, ft)
             if ratio >= FUZZY_MATCH_THRESHOLD and FUZZY_MATCH_CREDIT > best_credit:
@@ -183,7 +262,7 @@ def _concept_credit(concept: set[str], field_tokens: set[str]) -> tuple[float, s
     return best_credit, best_reason
 
 
-def score_test(query_concepts: list[set[str]], test: TestCase, include_body: bool = True) -> tuple[float, list[str]]:
+def score_test(query_concepts: list[Concept], test: TestCase, include_body: bool = True) -> tuple[float, list[str]]:
     """Score a test case against the query's concept groups (see
     `group_query_concepts`: one set of interchangeable synonym tokens per
     distinct word the user typed).

@@ -74,17 +74,31 @@ def build_command(tool: str, repo_root: str, tests: list[TestCase], exact: bool 
     return cmd
 
 
-def _run_group(tests: list[TestCase], project_root: str, tool: str, dry_run: bool, extra_args: str, exact: bool) -> list[TestResult]:
+def _run_group(
+    tests: list[TestCase],
+    project_root: str,
+    tool: str,
+    dry_run: bool,
+    extra_args: str,
+    exact: bool,
+    env: dict[str, str] | None = None,
+) -> list[TestResult]:
     cmd = build_command(tool, project_root, tests, exact=exact)
     if extra_args:
         cmd.extend(extra_args.split())
 
     if dry_run:
-        return [TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run, cwd={project_root}] {' '.join(cmd)}") for t in tests]
+        env_prefix = " ".join(f"{k}={v}" for k, v in (env or {}).items())
+        shown_cmd = f"{env_prefix} {' '.join(cmd)}".strip()
+        return [
+            TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run, cwd={project_root}] {shown_cmd}")
+            for t in tests
+        ]
 
+    run_env = {**os.environ, **env} if env else None
     start = time.time()
     try:
-        proc = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=3600)
+        proc = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=3600, env=run_env)
     except FileNotFoundError:
         return [
             TestResult(test=t, status=Status.ERROR, message=f"{tool} executable not found on PATH")
@@ -127,7 +141,12 @@ def _run_group(tests: list[TestCase], project_root: str, tool: str, dry_run: boo
 
 
 def run_java_tests(
-    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    tests: list[TestCase],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     if not tests:
         return []
@@ -150,5 +169,5 @@ def run_java_tests(
                 for t in group_tests
             )
             continue
-        results.extend(_run_group(group_tests, project_root, tool, dry_run, extra_args, exact))
+        results.extend(_run_group(group_tests, project_root, tool, dry_run, extra_args, exact, env))
     return results

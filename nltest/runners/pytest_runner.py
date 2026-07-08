@@ -35,7 +35,12 @@ def build_command(tests: list[TestCase], junit_xml_path: str, extra_args: str = 
 
 
 def run_pytest_tests(
-    tests: list[TestCase], repo_root: str, dry_run: bool = False, extra_args: str = "", exact: bool = False
+    tests: list[TestCase],
+    repo_root: str,
+    dry_run: bool = False,
+    extra_args: str = "",
+    exact: bool = False,
+    env: dict[str, str] | None = None,
 ) -> list[TestResult]:
     if not tests:
         return []
@@ -45,14 +50,14 @@ def run_pytest_tests(
         cmd = build_command(tests, junit_path, extra_args, exact=exact)
 
         if dry_run:
-            return [
-                TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run] {' '.join(cmd)}")
-                for t in tests
-            ]
+            env_prefix = " ".join(f"{k}={v}" for k, v in (env or {}).items())
+            shown_cmd = f"{env_prefix} {' '.join(cmd)}".strip()
+            return [TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run] {shown_cmd}") for t in tests]
 
+        run_env = {**os.environ, **env} if env else None
         start = time.time()
         try:
-            proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, timeout=1800)
+            proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, timeout=1800, env=run_env)
         except FileNotFoundError:
             return [
                 TestResult(test=t, status=Status.ERROR, message="pytest is not installed/available on PATH")

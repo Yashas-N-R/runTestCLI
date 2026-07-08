@@ -15,6 +15,7 @@ from nltest.models import RunReport
 from nltest.report import print_console_report, print_matches_preview, write_html_report, write_json_report
 from nltest.runners import run_matches
 from nltest.scanners import scan_repo
+from nltest.scenario import resolve_scenario
 
 console = Console()
 
@@ -139,17 +140,50 @@ def cmd_run(args: argparse.Namespace) -> int:
     tests = scan_repo(config)
     console.print(f"[bold]Discovered {len(tests)} test case(s) across all supported frameworks.[/bold]")
 
-    matches = score_matches(args.query, tests, config)
-    if args.limit:
-        matches = matches[: args.limit]
-    matches = augment_matches(args.query, matches, tests, config)
+    # Understand the query's actual intent first: is this one scenario, or a
+    # compound request like "test save employment after importing" that
+    # names two distinct scenarios with an explicit run-order between them?
+    # Compound requests are resolved clause-by-clause (each independently
+    # matched against the repo), with any clause that has no corresponding
+    # test case flagged and interactively resolved -- rather than blending
+    # every word into one keyword-soup query.
+    plan = resolve_scenario(args.query, tests, config, prompt=console.input, announce=console.print)
+
+    if plan.aborted:
+        console.print("[red]Aborted.[/red]")
+        return 1
+
+    # Execution batches: (label, matches, env_overrides), run strictly in
+    # this order. For a compound query, the order comes directly from the
+    # user's own wording (prerequisite before main) and takes precedence
+    # over CI-pipeline staging. For a simple query, fall back to the
+    # existing single-scenario flow: dependency/feature_map augmentation,
+    # optional --limit, and (if configured) CI-pipeline-order staging.
+    stage_labels: dict[str, str] = {}
+    ci_rules: list = []
+
+    if plan.is_compound:
+        for cr in plan.runnable_clauses():
+            cr.matches = augment_matches(cr.clause.text, cr.matches, tests, config)
+        batches = [
+            (f"{cr.clause.role}: {cr.clause.text}", cr.matches, cr.env_overrides) for cr in plan.runnable_clauses()
+        ]
+        matches = plan.all_matches()
+        console.print(
+            f'[dim]Understood "{args.query}" as {len(plan.clauses)} scenario(s), run in the order you specified.[/dim]'
+        )
+    else:
+        matches = plan.clauses[0].matches if plan.clauses else []
+        if args.limit:
+            matches = matches[: args.limit]
+        matches = augment_matches(args.query, matches, tests, config)
+
+        ci_rules = load_order_rules(config.repo_root) if config.respect_ci_order else []
+        if ci_rules:
+            matches, stage_labels = order_matches(matches, ci_rules)
+        batches = [(label, group, {}) for label, group in group_by_stage(matches, stage_labels)]
 
     dependency_count = sum(1 for m in matches if any(r.startswith("dependency-of:") for r in m.matched_on))
-
-    ci_rules = load_order_rules(config.repo_root) if config.respect_ci_order else []
-    stage_labels: dict[str, str] = {}
-    if ci_rules:
-        matches, stage_labels = order_matches(matches, ci_rules)
 
     report = RunReport(query=args.query, matches=matches, dry_run=args.dry_run)
     print_matches_preview(report, console, stage_labels=stage_labels)
@@ -183,11 +217,20 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     results = []
-    for stage_label, stage_matches in group_by_stage(matches, stage_labels):
+    for stage_label, stage_matches, stage_env in batches:
+        if not stage_matches:
+            continue
         if stage_label:
             console.print(f"\n[bold cyan]-- stage: {stage_label} --[/bold cyan]")
         results.extend(
-            run_matches(stage_matches, config.repo_root, dry_run=args.dry_run, extra_args=args.extra_args, exact=args.exact)
+            run_matches(
+                stage_matches,
+                config.repo_root,
+                dry_run=args.dry_run,
+                extra_args=args.extra_args,
+                exact=args.exact,
+                env=stage_env or None,
+            )
         )
     report.results = results
     report.finished_at = time.time()
