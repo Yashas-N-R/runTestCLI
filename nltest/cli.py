@@ -1,0 +1,174 @@
+"""nltest CLI: run automation test suites using plain English commands."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+
+from rich.console import Console
+
+from nltest.config import NLTestConfig
+from nltest.matcher import match_query
+from nltest.models import RunReport
+from nltest.report import print_console_report, print_matches_preview, write_html_report, write_json_report
+from nltest.runners import run_matches
+from nltest.scanners import scan_repo
+
+console = Console()
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="nltest",
+        description="Run automation test suites (Selenium, Playwright, Cypress, REST Assured, JUnit, TestNG, "
+        "pytest, Jest, Mocha, ...) using plain English commands.",
+    )
+    parser.add_argument("--repo", default=".", help="Path to the test automation repo (default: current directory)")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    run_p = sub.add_parser("run", help="Match and execute tests for a natural-language query")
+    run_p.add_argument("query", help='e.g. "test recording" or "run login and checkout tests"')
+    run_p.add_argument("--dry-run", action="store_true", help="Show which tests/commands would run, without executing them")
+    run_p.add_argument("--yes", "-y", action="store_true", help="Skip the confirmation prompt before running")
+    run_p.add_argument("--json", dest="json_out", help="Write a JSON report to this path")
+    run_p.add_argument("--html", dest="html_out", help="Write an HTML report to this path")
+    run_p.add_argument("--extra-args", default="", help="Extra args forwarded verbatim to the underlying test runner")
+    run_p.add_argument("--threshold", type=float, default=None, help="Override the match score threshold (0-1)")
+    run_p.add_argument("--limit", type=int, default=None, help="Max number of matched tests to run")
+
+    index_p = sub.add_parser("index", help="Scan the repo and list all discovered test cases")
+    index_p.add_argument("--tag", default=None, help="Only show tests with this tag")
+    index_p.add_argument("--framework", default=None, help="Only show tests for this framework")
+
+    tags_p = sub.add_parser("list-tags", help="List all tags/markers/groups discovered across the repo")
+
+    match_p = sub.add_parser("match", help="Preview which tests a query would match, without running anything")
+    match_p.add_argument("query", help='e.g. "test recording"')
+    match_p.add_argument("--threshold", type=float, default=None)
+
+    return parser
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    config = NLTestConfig.load(args.repo)
+    tests = scan_repo(config)
+    if args.tag:
+        tests = [t for t in tests if args.tag in t.tags]
+    if args.framework:
+        tests = [t for t in tests if t.framework.value == args.framework]
+
+    from rich.table import Table
+
+    table = Table(title=f"Discovered tests in {config.repo_root} ({len(tests)})")
+    table.add_column("Name")
+    table.add_column("Framework")
+    table.add_column("Stack")
+    table.add_column("File")
+    table.add_column("Tags")
+    for t in sorted(tests, key=lambda t: (t.framework.value, t.file_path, t.name)):
+        table.add_row(t.name, t.framework.value, t.stack.value, f"{t.file_path}:{t.line or ''}", ", ".join(t.tags))
+    console.print(table)
+    if not tests:
+        console.print(
+            "[yellow]No tests found.[/yellow] Supported: pytest/Selenium/Playwright(py), "
+            "Playwright(JS/TS)/Cypress/Jest/Mocha, JUnit/TestNG (Selenium/REST Assured)."
+        )
+    return 0
+
+
+def cmd_list_tags(args: argparse.Namespace) -> int:
+    config = NLTestConfig.load(args.repo)
+    tests = scan_repo(config)
+    tag_counts: dict[str, int] = {}
+    for t in tests:
+        for tag in t.tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+    from rich.table import Table
+
+    table = Table(title="Tags discovered in repo")
+    table.add_column("Tag")
+    table.add_column("Count")
+    for tag, count in sorted(tag_counts.items(), key=lambda kv: -kv[1]):
+        table.add_row(tag, str(count))
+    console.print(table)
+    return 0
+
+
+def cmd_match(args: argparse.Namespace) -> int:
+    config = NLTestConfig.load(args.repo)
+    if args.threshold is not None:
+        config.match_threshold = args.threshold
+    tests = scan_repo(config)
+    matches = match_query(args.query, tests, config)
+    report = RunReport(query=args.query, matches=matches, dry_run=True)
+    print_matches_preview(report, console)
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    config = NLTestConfig.load(args.repo)
+    if args.threshold is not None:
+        config.match_threshold = args.threshold
+
+    console.print(f'[bold]Scanning repo:[/bold] {config.repo_root}')
+    tests = scan_repo(config)
+    console.print(f"[bold]Discovered {len(tests)} test case(s) across all supported frameworks.[/bold]")
+
+    matches = match_query(args.query, tests, config)
+    if args.limit:
+        matches = matches[: args.limit]
+
+    report = RunReport(query=args.query, matches=matches, dry_run=args.dry_run)
+    print_matches_preview(report, console)
+
+    if not matches:
+        console.print("[yellow]Nothing to run.[/yellow] Try `nltest index` to see available tests, "
+                       "or `nltest list-tags` to see recognized tags.")
+        return 1
+
+    if not args.dry_run and not args.yes:
+        answer = console.input(f"\nRun these {len(matches)} test(s)? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            console.print("Aborted.")
+            return 1
+
+    results = run_matches(matches, config.repo_root, dry_run=args.dry_run, extra_args=args.extra_args)
+    report.results = results
+    report.finished_at = time.time()
+
+    print_console_report(report, console)
+
+    if args.json_out:
+        write_json_report(report, args.json_out)
+        console.print(f"[dim]JSON report written to {args.json_out}[/dim]")
+    if args.html_out:
+        write_html_report(report, args.html_out)
+        console.print(f"[dim]HTML report written to {args.html_out}[/dim]")
+
+    if args.dry_run:
+        return 0
+    return 1 if (report.failed or report.errors) else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    handlers = {
+        "run": cmd_run,
+        "index": cmd_index,
+        "list-tags": cmd_list_tags,
+        "match": cmd_match,
+    }
+    handler = handlers[args.command]
+    try:
+        return handler(args)
+    except KeyboardInterrupt:
+        console.print("\n[red]Interrupted.[/red]")
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

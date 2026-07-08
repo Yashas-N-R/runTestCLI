@@ -1,0 +1,24 @@
+# Example nltest configuration for a multi-stack automation repo.
+# Place a file named .nltestrc.yml at the root of your test repo to customize
+# how nltest scans and matches tests.
+
+exclude_dirs:
+  - fixtures
+  - __snapshots__
+
+# Extend the built-in synonym dictionary with domain-specific vocabulary.
+# Keys are canonical concepts; values are alternate words/phrases users might
+# say that should also match tests tagged/named with the canonical concept.
+synonyms:
+  recording:
+    - screencast
+    - screen-capture
+  checkout:
+    - buy-now
+
+# Lower this to broaden matches (more recall, more false positives), or raise
+# it to be stricter (fewer, more precise matches). Range: 0.0 - 1.0.
+match_threshold: 0.35
+
+# Cap on how many matched tests a single `nltest run` will execute.
+max_matches: 200
