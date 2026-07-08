@@ -293,10 +293,6 @@ feature_map:
     - "name:some_exact_test_name"      # or with this exact name
 ```
 
-See it in action: `examples/sample-multistack-repo` has a test tagged only
-`beacon_internal_codename` that `nltest match "test recording"` still finds,
-purely via its `.nltestrc.yml` feature_map entry.
-
 ## "What if a test has a dependency on another test?"
 
 Two separate problems, two separate mitigations:
@@ -411,33 +407,6 @@ synonyms:
 semantic_matching: true   # embedding-based understanding of differently-worded queries
 match_threshold: 0.35     # 0.0 (loose) - 1.0 (strict)
 max_matches: 200
-```
-
-See [`examples/sample-multistack-repo/.nltestrc.yml`](examples/sample-multistack-repo/.nltestrc.yml)
-for a full example.
-
-## Example: a repo with 5 different stacks
-
-[`examples/sample-multistack-repo/`](examples/sample-multistack-repo/) contains a
-fixture repo with recording-related tests written in pytest+Selenium,
-Playwright (Python), Playwright (TS), Cypress, JUnit 5+Selenium, and
-TestNG+REST Assured. Try it out:
-
-```bash
-cd examples/sample-multistack-repo
-nltest index
-nltest run "test recording" --dry-run
-```
-
-`nltest match "test recording"` will surface all 14 recording-related tests
-across every one of those 6 frameworks, while correctly excluding unrelated
-login/checkout/search tests.
-
-## Development
-
-```bash
-pip install -e ".[dev]"   # includes sentence-transformers for semantic-matching tests
-pytest tests/
 ```
 
 ## Architecture
