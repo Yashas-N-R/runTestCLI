@@ -13,6 +13,8 @@ import re
 from nltest.config import NLTestConfig
 from nltest.models import Framework, Stack, TestCase
 
+from .context import build_file_context, build_filename_index
+
 JS_TEST_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
 # Matches: it("name", ...), it('name', ...), test("name", ...), it.only(...), test.skip(...)
@@ -106,8 +108,11 @@ def _depends_near(lines: list[str], lineno: int) -> list[str]:
 def scan_js(config: NLTestConfig) -> list[TestCase]:
     from . import iter_source_files
 
+    all_js_paths = iter_source_files(config, JS_TEST_EXTENSIONS)
+    filename_index = build_filename_index(all_js_paths)
+
     tests: list[TestCase] = []
-    for path in iter_source_files(config, JS_TEST_EXTENSIONS):
+    for path in all_js_paths:
         base = os.path.basename(path).lower()
         is_test_file = (
             ".spec." in base
@@ -126,6 +131,8 @@ def scan_js(config: NLTestConfig) -> list[TestCase]:
         stack, framework = _detect_stack_and_framework(path, source)
         rel_path = os.path.relpath(path, config.repo_root)
         lines = source.splitlines()
+        language = "javascript" if path.endswith((".js", ".jsx", ".mjs", ".cjs")) else "typescript"
+        file_context = build_file_context(source, language, filename_index) if config.search_body else ""
 
         # Track the nearest enclosing describe() block title (best-effort, by
         # scanning describes/its in source order and using indentation-free
@@ -162,7 +169,8 @@ def scan_js(config: NLTestConfig) -> list[TestCase]:
                     description=title,
                     body=body,
                     depends_on=depends_on,
-                    language="javascript" if path.endswith((".js", ".jsx", ".mjs", ".cjs")) else "typescript",
+                    file_context=file_context,
+                    language=language,
                 )
             )
 

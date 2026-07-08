@@ -120,6 +120,7 @@ FIELD_WEIGHTS: dict[str, float] = {
     "stack": 1.5,
     "description": 1.0,
     "body": 0.75,
+    "file_context": 0.6,
     "class_name": 0.5,
     "file_path": 0.5,
 }
@@ -158,9 +159,11 @@ def _field_tokens(test: TestCase, field_name: str) -> set[str]:
         text = test.file_path
     elif field_name == "body":
         text = test.body
+    elif field_name == "file_context":
+        text = test.file_context
     else:
         text = ""
-    return set(tokenize(text, drop_stopwords=(field_name == "body")))
+    return set(tokenize(text, drop_stopwords=(field_name in ("body", "file_context"))))
 
 
 def _concept_credit(concept: set[str], field_tokens: set[str]) -> tuple[float, str | None]:
@@ -191,7 +194,7 @@ def score_test(query_concepts: list[set[str]], test: TestCase, include_body: boo
     if not query_concepts:
         return 0.0, []
 
-    active_weights = FIELD_WEIGHTS if include_body else {k: v for k, v in FIELD_WEIGHTS.items() if k != "body"}
+    active_weights = FIELD_WEIGHTS if include_body else {k: v for k, v in FIELD_WEIGHTS.items() if k not in ("body", "file_context")}
     # Normalize against the single highest-weighted field (tags) rather than
     # the sum of every field's weight. Otherwise a test with no tags could
     # never cross the default threshold from a perfect name/body match alone,

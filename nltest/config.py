@@ -66,6 +66,12 @@ class NLTestConfig:
     `# depends-on:` / `// depends-on:` comment), so isolated runs don't skip
     required setup steps."""
 
+    respect_ci_order: bool = True
+    """Read the repo's CI pipeline YAML (GitHub Actions/GitLab CI/CircleCI/
+    Azure Pipelines/Bitbucket Pipelines) to see how test suites are already
+    staged/ordered there (e.g. smoke before regression), and run matched
+    tests in that same relative order."""
+
     feature_map: dict[str, list[str]] = field(default_factory=dict)
     """Manual escape hatch for phrases that scanning/matching can't infer on
     their own. Maps a phrase (matched as a substring/fuzzy match against the
@@ -110,6 +116,8 @@ class NLTestConfig:
             self.search_body = bool(data["search_body"])
         if "include_dependencies" in data:
             self.include_dependencies = bool(data["include_dependencies"])
+        if "respect_ci_order" in data:
+            self.respect_ci_order = bool(data["respect_ci_order"])
         if "feature_map" in data:
             for phrase, selectors in data["feature_map"].items():
                 self.feature_map[phrase] = list(selectors)

@@ -28,12 +28,14 @@ STATUS_SYMBOL = {
 }
 
 
-def print_matches_preview(report: RunReport, console: Console | None = None) -> None:
+def print_matches_preview(report: RunReport, console: Console | None = None, stage_labels: dict[str, str] | None = None) -> None:
     console = console or Console()
     if not report.matches:
         console.print(f"[yellow]No tests matched query:[/yellow] \"{report.query}\"")
         return
     table = Table(title=f'Matched tests for: "{report.query}"')
+    if stage_labels:
+        table.add_column("Stage")
     table.add_column("Score")
     table.add_column("Test")
     table.add_column("Framework")
@@ -41,14 +43,20 @@ def print_matches_preview(report: RunReport, console: Console | None = None) -> 
     table.add_column("Tags")
     table.add_column("Why")
     for m in report.matches:
-        table.add_row(
-            f"{m.score:.2f}",
-            m.test.name,
-            m.test.framework.value,
-            f"{m.test.file_path}:{m.test.line or ''}",
-            ", ".join(m.test.tags),
-            ", ".join(m.matched_on[:3]),
+        row = []
+        if stage_labels:
+            row.append(stage_labels.get(m.test.id, "-"))
+        row.extend(
+            [
+                f"{m.score:.2f}",
+                m.test.name,
+                m.test.framework.value,
+                f"{m.test.file_path}:{m.test.line or ''}",
+                ", ".join(m.test.tags),
+                ", ".join(m.matched_on[:3]),
+            ]
         )
+        table.add_row(*row)
     console.print(table)
 
 

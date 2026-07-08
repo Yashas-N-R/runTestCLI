@@ -88,6 +88,7 @@ nltest run "test recording" --threshold 0.5    # be stricter about matches
 nltest run "test recording" --extra-args="-x"  # forwarded to the underlying runner
 nltest run "test recording" --exact            # only run matched tests, not whole files/classes
 nltest run "test recording" --no-deps          # don't auto-include declared dependencies
+nltest run "test recording" --no-ci-order      # ignore CI pipeline staging, use match-score order
 nltest --repo /path/to/other/repo run "smoke test checkout"
 ```
 
@@ -128,14 +129,30 @@ file path — tags simply make matching more precise.
 
 ## "What if the feature isn't mentioned in the test title?"
 
-Matching doesn't just look at titles. It also searches:
+Matching doesn't just look at titles. It searches everything nltest can find
+a signal in, each weighted by how reliable a signal it typically is:
 
+- **Tags/markers/groups** (highest weight) — `@pytest.mark.recording`, `@Tag("recording")`, TestNG `groups = {"recording"}`.
+- **The test's own name**.
 - **The test's source code (body)** — a Cypress test with no "recording" in
   its title/tags will still match `"test recording"` if its body does
   `cy.get('[data-testid=recording-toggle-button]')`.
 - **The docstring/`@DisplayName`**, even when the title itself is generic.
-- **The file/class name** (with lower weight, since being co-located in a
-  relevant file is a weaker signal than the test itself being about it).
+- **Every comment in the file** the test lives in (a file-level comment or
+  class javadoc describing the feature, even if it's not repeated in the
+  individual test) — plus, best-effort, **the content of any locally-defined
+  page-object/helper file the test imports** (e.g. a `RecordingPage` class),
+  since the feature might only be named there.
+- **The file/class name** (lowest weight — being co-located in a relevant
+  file/class is a weaker signal than the test itself being about it).
+
+This means "anything in the code or comments that has to do with the
+feature" gets pulled in, not just exact title matches. The trade-off is
+that file-level signals (comments, imported helpers) are shared by every
+test in that file, so an unrelated test living in a very on-topic file can
+occasionally surface as a weak match — the `Why` column in `nltest match`
+always shows exactly which field(s) matched so this stays transparent
+rather than being a black box.
 
 For the rare case where a feature is only referred to by an internal
 codename that appears *nowhere* in the test (title, tags, docstring, or
@@ -207,6 +224,47 @@ ordering/state without declaring it) — that's what safe-mode file/class
 execution is for. If your suite has cross-file dependencies, keep those
 tests' triggers in the same file/class, or declare them explicitly.
 
+## Respecting how your CI already stages/orders tests
+
+Most automation repos already encode a run order in their CI pipeline —
+smoke tests before regression, login before checkout, a fast suite before a
+slow one. `nltest run` reads that pipeline YAML (`.github/workflows/*.yml`,
+`.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`,
+`bitbucket-pipelines.yml`) and executes matched tests in the **same relative
+order/staging**, instead of an arbitrary one:
+
+```yaml
+# .github/workflows/e2e-tests.yml
+jobs:
+  smoke:      { steps: [{ run: pytest -m smoke }] }
+  login:      { needs: smoke,     steps: [{ run: pytest -k login }] }
+  recording:  { needs: login,     steps: [{ run: pytest -m recording }] }
+  checkout:   { needs: recording, steps: [{ run: mvn test -Dtest=...checkout }] }
+```
+
+Given that pipeline, `nltest run "test recording"` will run any
+smoke-tagged recording tests first (they're covered by the `smoke` job),
+then the rest of the recording suite — grouped into sequential stages named
+after the CI job, printed as `-- stage: recording --` etc. as it executes,
+and shown in a `Stage` column in `nltest match`/`run` previews. Tests that
+don't correspond to any recognized CI step still run, just placed after all
+recognized stages. Disable this with `--no-ci-order` to run in plain
+match-score order instead.
+
+How a test is matched to a stage:
+1. **File reference** — if a CI step's command references the test's file
+   directly (e.g. `cypress run --spec cypress/e2e/recording.cy.js`), every
+   test in that file is assigned to that step.
+2. **Tag overlap** — a step's marker/grep/group expression (`-m recording`,
+   `-k login`, `-Dgroups=recording`, `--tests ...`) is matched against the
+   test's own tags (not free-text name, to avoid false positives from
+   ordinary shared English words).
+
+This is a heuristic, not a full CI-schema parser — for GitLab CI specifically,
+job order is re-sorted by its declared `stages:` list (since GitLab's
+top-level job key order doesn't reflect run order the way GitHub
+Actions/Azure/Bitbucket's nested step lists do).
+
 ## Configuration
 
 Drop a `.nltestrc.yml` in your repo root to customize scanning/matching for
@@ -258,14 +316,17 @@ pytest tests/
 ```
 nltest/
   cli.py           # argparse-based CLI: run / index / list-tags / match
-  config.py        # .nltestrc.yml loading + defaults (synonyms, thresholds, excludes)
+  config.py        # .nltestrc.yml loading + defaults (synonyms, thresholds, excludes, feature_map)
   models.py        # TestCase, MatchResult, TestResult, RunReport
+  ci_order.py      # reads CI pipeline YAML to stage/order execution (smoke before regression, etc.)
   scanners/        # repo -> TestCase[] per language/framework
     python_scanner.py   # pytest / Selenium(py) / Playwright(py), via ast
     js_scanner.py        # Playwright(js) / Cypress / Jest / Mocha, via regex
     java_scanner.py      # JUnit / TestNG / Selenium / REST Assured, via regex
+    context.py            # shared: file-level comments + locally-imported helper file content
   matcher/         # NL query -> ranked TestCase[]
-    nlp.py               # tokenization, synonym expansion, fuzzy scoring
+    nlp.py               # tokenization, concept/synonym grouping, fuzzy scoring
+    dependencies.py       # resolves TestNG/pytest-dependency/comment-based test dependencies
   runners/         # TestCase[] -> shell command -> TestResult[]
     pytest_runner.py
     js_runner.py          # playwright/jest/mocha (JSON reporters) + cypress (best-effort)

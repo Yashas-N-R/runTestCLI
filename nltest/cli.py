@@ -8,6 +8,7 @@ import time
 
 from rich.console import Console
 
+from nltest.ci_order import group_by_stage, load_order_rules, order_matches
 from nltest.config import NLTestConfig
 from nltest.matcher import augment_matches, match_query, score_matches
 from nltest.models import RunReport
@@ -47,6 +48,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Don't auto-include tests that a matched test explicitly depends on "
         "(TestNG dependsOnMethods, pytest-dependency, # depends-on: comments)",
+    )
+    run_p.add_argument(
+        "--no-ci-order",
+        action="store_true",
+        help="Don't reorder/stage execution based on the repo's CI pipeline YAML "
+        "(.github/workflows, .gitlab-ci.yml, etc.) -- run in match-score order instead",
     )
 
     index_p = sub.add_parser("index", help="Scan the repo and list all discovered test cases")
@@ -125,6 +132,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         config.match_threshold = args.threshold
     if args.no_deps:
         config.include_dependencies = False
+    if args.no_ci_order:
+        config.respect_ci_order = False
 
     console.print(f'[bold]Scanning repo:[/bold] {config.repo_root}')
     tests = scan_repo(config)
@@ -137,8 +146,13 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     dependency_count = sum(1 for m in matches if any(r.startswith("dependency-of:") for r in m.matched_on))
 
+    ci_rules = load_order_rules(config.repo_root) if config.respect_ci_order else []
+    stage_labels: dict[str, str] = {}
+    if ci_rules:
+        matches, stage_labels = order_matches(matches, ci_rules)
+
     report = RunReport(query=args.query, matches=matches, dry_run=args.dry_run)
-    print_matches_preview(report, console)
+    print_matches_preview(report, console, stage_labels=stage_labels)
     if dependency_count:
         console.print(
             f"[dim]({dependency_count} of the above were auto-included because a matched test depends on them; "
@@ -148,6 +162,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         console.print(
             "[dim]Running in safe mode: whole files/classes will execute (not just the matched tests), "
             "so shared setup/state isn't skipped. Pass --exact to run only the matched tests.[/dim]"
+        )
+    if stage_labels:
+        ci_sources = sorted({r.source for r in ci_rules})
+        console.print(
+            f"[dim]Ordering execution to match the CI pipeline stages found in {', '.join(ci_sources)} "
+            "(e.g. smoke before regression). Pass --no-ci-order to run in match-score order instead.[/dim]"
         )
 
     if not matches:
@@ -162,7 +182,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             console.print("Aborted.")
             return 1
 
-    results = run_matches(matches, config.repo_root, dry_run=args.dry_run, extra_args=args.extra_args, exact=args.exact)
+    results = []
+    for stage_label, stage_matches in group_by_stage(matches, stage_labels):
+        if stage_label:
+            console.print(f"\n[bold cyan]-- stage: {stage_label} --[/bold cyan]")
+        results.extend(
+            run_matches(stage_matches, config.repo_root, dry_run=args.dry_run, extra_args=args.extra_args, exact=args.exact)
+        )
     report.results = results
     report.finished_at = time.time()
 

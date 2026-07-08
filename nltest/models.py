@@ -70,6 +70,13 @@ class TestCase:
     """This test's own registered dependency name, if any (e.g. pytest-dependency's
     `@pytest.mark.dependency(name=...)`), used to resolve other tests' depends_on."""
 
+    file_context: str = ""
+    """Weak-signal fallback text: every comment in the file this test lives in,
+    plus (best-effort) the content of any locally-imported helper/page-object
+    file the test file references. Catches cases where the feature is only
+    mentioned in a comment elsewhere in the file, or inside a page object the
+    test drives rather than in the test itself."""
+
     language: str = "unknown"
 
     def searchable_text(self) -> str:

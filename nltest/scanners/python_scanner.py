@@ -10,6 +10,8 @@ import re
 from nltest.config import NLTestConfig
 from nltest.models import Framework, Stack, TestCase
 
+from .context import build_file_context, build_filename_index
+
 TAG_COMMENT_RE = re.compile(r"#\s*tags?:\s*(.+)$", re.IGNORECASE)
 DEPENDS_COMMENT_RE = re.compile(r"#\s*depends-on:\s*(.+)$", re.IGNORECASE)
 
@@ -103,8 +105,11 @@ def _dependency_marker(decorator: ast.expr) -> tuple[str | None, list[str]]:
 def scan_python(config: NLTestConfig) -> list[TestCase]:
     from . import iter_source_files
 
+    all_py_paths = iter_source_files(config, (".py",))
+    filename_index = build_filename_index(all_py_paths)
+
     tests: list[TestCase] = []
-    for path in iter_source_files(config, (".py",)):
+    for path in all_py_paths:
         base = os.path.basename(path)
         if not (base.startswith("test_") or base.endswith("_test.py") or "test" in base.lower()):
             continue
@@ -119,6 +124,7 @@ def scan_python(config: NLTestConfig) -> list[TestCase]:
         stack = _detect_stack(source)
         framework = _detect_framework(source, stack)
         rel_path = os.path.relpath(path, config.repo_root)
+        file_context = build_file_context(source, "python", filename_index) if config.search_body else ""
 
         def collect_from_func(node: ast.FunctionDef | ast.AsyncFunctionDef, class_name: str | None):
             if not node.name.startswith("test"):
@@ -150,6 +156,7 @@ def scan_python(config: NLTestConfig) -> list[TestCase]:
                     body=body,
                     depends_on=sorted(set(depends_on)),
                     dependency_name=own_dep_name,
+                    file_context=file_context,
                     language="python",
                 )
             )

@@ -72,3 +72,28 @@ def test_java_scanner_extracts_junit_tags_and_testng_groups(config):
     assert testng_test.stack == Stack.REST_ASSURED
     assert "recording" in testng_test.tags
     assert "api" in testng_test.tags
+
+
+def test_java_scanner_extracts_testng_dependencies(config):
+    tests = scan_java(config)
+    by_name = {t.name: t for t in tests}
+    assert "startRecordingReturns201" in by_name["deleteRecordingRemovesDownloadUrl"].depends_on
+    assert "startRecordingReturns201" in by_name["cleanupTempStorageAfterEachRun"].depends_on
+
+
+def test_python_scanner_extracts_pytest_dependency_marker(config):
+    tests = scan_python(config)
+    by_name = {t.name: t for t in tests}
+    setup = by_name["test_recording_can_be_started_for_share_test"]
+    assert setup.dependency_name == "recording_started"
+    downstream = by_name["test_share_button_opens_dialog"]
+    assert "recording_started" in downstream.depends_on
+
+
+def test_scanners_populate_file_context_with_comments(config):
+    """file_context should capture comments elsewhere in the file (e.g. a
+    class-level javadoc), not just the individual test's own body."""
+    tests = scan_java(config)
+    by_name = {t.name: t for t in tests}
+    login_test_in_recording_file = by_name["loginPageRendersCorrectly"]
+    assert "recording" in login_test_in_recording_file.file_context.lower()

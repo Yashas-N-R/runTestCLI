@@ -1,0 +1,36 @@
+name: E2E Tests
+
+# This is the "arrangement" nltest reads to decide run order: smoke tests
+# first, then login, then the recording suite (across every stack that has
+# recording tests), then checkout last. `nltest run` mirrors this staging
+# instead of running matched tests in an arbitrary order.
+on: [push]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pytest python_selenium_tests -m smoke
+
+  login:
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - run: pytest python_selenium_tests -k login
+      - run: mvn test -Dtest=RecordingUiTest#loginPageRendersCorrectly
+
+  recording:
+    runs-on: ubuntu-latest
+    needs: login
+    steps:
+      - run: pytest python_selenium_tests -m recording
+      - run: pytest python_playwright_tests
+      - run: npx playwright test playwright-js/tests/recording.spec.ts
+      - run: npx cypress run --spec cypress/e2e/recording.cy.js
+      - run: mvn test -Dtest=RecordingUiTest,RecordingApiTest
+
+  checkout:
+    runs-on: ubuntu-latest
+    needs: recording
+    steps:
+      - run: mvn test -Dtest=RecordingApiTest#createOrderReturns200
