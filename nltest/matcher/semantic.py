@@ -9,13 +9,9 @@ model and compares them by cosine similarity. Two phrases that mean the same
 thing end up close together in that vector space regardless of which words
 were used, without anyone having to enumerate the relationship.
 
-This is an OPTIONAL layer: it activates automatically if the
-`sentence-transformers` package is installed (`pip install nltest[semantic]`)
-and a model can be loaded (first use downloads a small ~90MB model from
-Hugging Face and caches it locally; after that it's fully offline). If it's
-not installed, or the model can't be loaded (no network on first run, etc.),
-nltest degrades gracefully to lexical/tag/fuzzy matching only -- it does not
-fall back to a hardcoded word-to-word dictionary.
+The PyPI wheel bundles the MiniLM model locally so ``pip install nltest`` works
+fully offline with no Hugging Face download. Set ``NLTEST_ALLOW_NETWORK=1``
+only if you need to fetch a custom model via ``NLTEST_EMBEDDING_MODEL``.
 """
 
 from __future__ import annotations
@@ -24,10 +20,40 @@ import functools
 import hashlib
 import os
 
+from nltest.security import network_allowed
+
 DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 MODEL_NAME = os.environ.get("NLTEST_EMBEDDING_MODEL", DEFAULT_MODEL_NAME)
 
 _warned_unavailable = False
+
+
+def _bundled_model_path() -> str | None:
+    pkg_dir = os.path.dirname(os.path.dirname(__file__))
+    candidate = os.path.join(pkg_dir, "bundled_models", "all-MiniLM-L6-v2")
+    if os.path.isfile(os.path.join(candidate, "config.json")):
+        return candidate
+    return None
+
+
+def _resolve_model_source() -> str:
+    if os.environ.get("NLTEST_EMBEDDING_MODEL"):
+        source = MODEL_NAME
+        if not network_allowed() and not os.path.isdir(source):
+            raise RuntimeError(
+                "NLTEST_EMBEDDING_MODEL points to a remote/custom model but "
+                "NLTEST_ALLOW_NETWORK is not set. nltest does not phone home by default."
+            )
+        return source
+    bundled = _bundled_model_path()
+    if bundled:
+        return bundled
+    if network_allowed():
+        return DEFAULT_MODEL_NAME
+    raise RuntimeError(
+        "Bundled embedding model is missing and NLTEST_ALLOW_NETWORK is not set. "
+        "Reinstall nltest from PyPI or set NLTEST_ALLOW_NETWORK=1 to download the model once."
+    )
 
 
 @functools.lru_cache(maxsize=1)
@@ -37,10 +63,11 @@ def _load_model():
     except ImportError:
         return None
     try:
-        return SentenceTransformer(MODEL_NAME)
+        source = _resolve_model_source()
+        # Offline-first: never hit Hugging Face Hub unless explicitly allowed.
+        local_only = not network_allowed() and not os.environ.get("NLTEST_EMBEDDING_MODEL")
+        return SentenceTransformer(source, local_files_only=local_only)
     except Exception:
-        # No network on first use, corrupt cache, unsupported platform, etc.
-        # -- semantic matching just isn't available this run.
         return None
 
 
@@ -49,9 +76,7 @@ def is_available() -> bool:
 
 
 def warn_if_unavailable(announce) -> None:
-    """Print a one-time, non-fatal notice explaining degraded matching mode,
-    so users understand *why* recall might be lower rather than silently
-    wondering why a differently-worded query didn't match."""
+    """Print a one-time, non-fatal notice explaining degraded matching mode."""
     global _warned_unavailable
     if _warned_unavailable or is_available():
         return
@@ -59,9 +84,12 @@ def warn_if_unavailable(announce) -> None:
     try:
         import sentence_transformers  # noqa: F401
 
-        reason = "the embedding model couldn't be loaded (no network on first use?)"
+        if _bundled_model_path() is None and not network_allowed():
+            reason = "the bundled embedding model is missing and network access is disabled (set NLTEST_ALLOW_NETWORK=1 to download once)"
+        else:
+            reason = "the embedding model couldn't be loaded"
     except ImportError:
-        reason = "the optional `sentence-transformers` package isn't installed (`pip install nltest[semantic]`)"
+        reason = "sentence-transformers is not installed"
     announce(
         f"[dim]Semantic matching is unavailable ({reason}) -- falling back to tag/name/fuzzy matching only. "
         "Differently-worded queries for the same feature may not be found.[/dim]"
@@ -87,8 +115,7 @@ def _corpus_key(texts: list[str]) -> str:
 
 def embed_corpus_cached(texts: list[str]):
     """Like `embed`, but memoized per unique corpus (by content hash) for the
-    lifetime of the process -- so resolving multiple clauses of a compound
-    query against the same set of tests only encodes the corpus once."""
+    lifetime of the process."""
     if not texts:
         return None
     key = _corpus_key(texts)
@@ -98,8 +125,7 @@ def embed_corpus_cached(texts: list[str]):
 
 
 def similarities(query: str, corpus_embeddings) -> list[float] | None:
-    """Cosine similarity of `query` against each row of `corpus_embeddings`
-    (already L2-normalized), or None if semantic matching isn't available."""
+    """Cosine similarity of `query` against each row of `corpus_embeddings`."""
     if corpus_embeddings is None:
         return None
     query_embedding = embed([query])

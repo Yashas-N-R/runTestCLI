@@ -70,15 +70,58 @@ See [`nltest/scanners/`](nltest/scanners/) and [`nltest/runners/`](nltest/runner
 ## Installation
 
 ```bash
-pip install -e ".[semantic]"   # recommended: includes semantic (embedding) matching
-pip install -e .               # lexical/tag/fuzzy matching only, no ML dependency
+pip install nltest
 ```
 
-This installs the `nltest` command (backed by `nltest/cli.py`). The `semantic`
-extra pulls in `sentence-transformers`; on first use it downloads a small
-(~90MB) embedding model from Hugging Face and caches it locally, after which
-matching works fully offline. Without it, `nltest` still works — it just
-falls back to tag/name/description/fuzzy matching (see below).
+That's it — the `nltest` command is installed with semantic matching built in.
+The PyPI wheel ships the small MiniLM embedding model (~90 MB) **inside the
+package**, so matching works **fully offline** with no Hugging Face download.
+
+**Requirements:** Python 3.9+, and whichever test runners your repo already uses
+(`pytest`, `npx playwright`, `mvn`, etc.) on your `PATH`.
+
+Verify:
+
+```bash
+nltest --help
+```
+
+### Install from source (contributors)
+
+```bash
+git clone https://github.com/Yashas-N-R/runTestCLI.git
+cd runTestCLI
+python scripts/bundle_embedding_model.py   # one-time: fetch model for offline wheel
+pip install -e .
+```
+
+### Custom / remote embedding model (optional)
+
+By default nltest never phones home. To download a different Hugging Face model
+once:
+
+```bash
+export NLTEST_ALLOW_NETWORK=1
+export NLTEST_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+nltest match "your query"
+```
+
+## Security
+
+`nltest` is a **local-only** tool. It does **not** upload your repository,
+tests, or match results anywhere. The embedding model runs on your machine; the
+PyPI wheel bundles it offline.
+
+Protections built in:
+
+- All repo reads stay inside `--repo` (no path traversal / symlink escape)
+- Credential files (`.env`, `*.pem`, `*secret*`, etc.) are never scanned
+- Subprocesses get a **stripped environment** — your shell API keys are not
+  forwarded to pytest/playwright/mvn
+- No network unless you set `NLTEST_ALLOW_NETWORK=1`
+- `--extra-args` rejects shell injection metacharacters
+
+See [SECURITY.md](SECURITY.md) for the full threat model and reporting process.
 
 ## Semantic matching, not a hardcoded dictionary
 
@@ -91,7 +134,7 @@ constant source of false positives from accidental word collisions (e.g.
 
 `nltest` now understands differently-worded queries using an actual
 sentence-embedding model (`nltest/matcher/semantic.py`, small MiniLM model
-via `sentence-transformers`) instead: the query and every test's
+via `sentence-transformers`, **bundled in the pip package**) instead: the query and every test's
 tags/name/description are encoded into vectors, and compared by cosine
 similarity. Two phrases that mean the same thing end up close together in
 that vector space regardless of which words were used — no dictionary
@@ -105,11 +148,8 @@ $ nltest match "ingest a batch of new hires from an external file"
 
 This is blended with (not a replacement for) tag/name/fuzzy matching — an
 exact tag match is still a very strong, cheap, reliable signal and always
-wins when both are available. Semantic matching activates automatically if
-`sentence-transformers` is installed and a model can be loaded; if not
-(dependency missing, no network on first use), `nltest` prints a one-time
-notice and degrades to lexical-only matching rather than failing. Disable it
-explicitly with `--no-semantic` or `semantic_matching: false` in
+wins when both are available. Semantic matching is on by default in the PyPI
+package. Disable it with `--no-semantic` or `semantic_matching: false` in
 `.nltestrc.yml`.
 
 The `synonyms:` config section still exists, but only as an **opt-in,
@@ -415,6 +455,7 @@ max_matches: 200
 nltest/
   cli.py           # argparse-based CLI: run / index / list-tags / match
   config.py        # .nltestrc.yml loading + defaults (synonyms, thresholds, excludes, feature_map)
+  security.py      # repo boundary checks, sensitive-file denylist, safe subprocess env, no-network default
   models.py        # TestCase, MatchResult, TestResult, RunReport
   ci_order.py      # reads CI pipeline YAML to stage/order execution (smoke before regression, etc.)
   scenario.py      # compound-query resolution: clauses, missing-step prompts, composite-test skip logic

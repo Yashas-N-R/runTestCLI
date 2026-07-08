@@ -10,6 +10,7 @@ import tempfile
 import time
 
 from nltest.models import Framework, Status, TestCase, TestResult
+from nltest.security import build_subprocess_env, parse_extra_args
 
 _STATUS_MAP = {
     "passed": Status.PASSED,
@@ -31,7 +32,7 @@ def _which(cmd: str) -> bool:
 
 
 def _run(cmd: list[str], cwd: str, env: dict[str, str] | None = None, timeout: int = 1800) -> tuple[int, str, str]:
-    run_env = {**os.environ, **env} if env else None
+    run_env = build_subprocess_env(env)
     try:
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=run_env)
         return proc.returncode, proc.stdout, proc.stderr
@@ -81,7 +82,7 @@ def run_playwright_js_tests(
         names = [re.escape(t.name) for t in tests]
         cmd.extend(["-g", "|".join(names)])
     if extra_args:
-        cmd.extend(extra_args.split())
+        cmd.extend(parse_extra_args(extra_args))
 
     if dry_run:
         return _dry_run_results(tests, cmd, env)
@@ -202,7 +203,7 @@ def run_mocha_tests(
         names = [re.escape(t.name) for t in tests]
         cmd.extend(["--grep", "|".join(names)])
     if extra_args:
-        cmd.extend(extra_args.split())
+        cmd.extend(parse_extra_args(extra_args))
 
     if dry_run:
         return _dry_run_results(tests, cmd, env)
@@ -260,7 +261,7 @@ def run_cypress_tests(
     files = sorted({t.file_path for t in tests})
     cmd = ["npx", "cypress", "run", "--spec", ",".join(files)]
     if extra_args:
-        cmd.extend(extra_args.split())
+        cmd.extend(parse_extra_args(extra_args))
 
     if dry_run:
         return _dry_run_results(tests, cmd, env)

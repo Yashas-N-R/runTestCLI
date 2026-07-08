@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import yaml
 
 from nltest.matcher.nlp import tokenize
+from nltest.security import is_within_repo, safe_read_text
 from nltest.models import MatchResult, TestCase
 
 CI_YAML_GLOBS = (
@@ -182,10 +183,14 @@ def load_order_rules(repo_root: str) -> list[OrderedStep]:
     counter = [0]
     for pattern in CI_YAML_GLOBS:
         for path in glob.glob(os.path.join(repo_root, pattern)):
+            if not is_within_repo(repo_root, path):
+                continue
+            doc_text = safe_read_text(path, repo_root)
+            if doc_text is None:
+                continue
             try:
-                with open(path, "r", encoding="utf-8") as fh:
-                    doc = yaml.safe_load(fh)
-            except (yaml.YAMLError, OSError):
+                doc = yaml.safe_load(doc_text)
+            except yaml.YAMLError:
                 continue
             if not isinstance(doc, dict):
                 continue

@@ -8,6 +8,7 @@ import subprocess
 import time
 
 from nltest.models import Status, TestCase, TestResult
+from nltest.security import build_subprocess_env, parse_extra_args
 
 from .junit_xml import find_reports, parse_junit_xml_files
 
@@ -85,7 +86,7 @@ def _run_group(
 ) -> list[TestResult]:
     cmd = build_command(tool, project_root, tests, exact=exact)
     if extra_args:
-        cmd.extend(extra_args.split())
+        cmd.extend(parse_extra_args(extra_args))
 
     if dry_run:
         env_prefix = " ".join(f"{k}={v}" for k, v in (env or {}).items())
@@ -95,7 +96,7 @@ def _run_group(
             for t in tests
         ]
 
-    run_env = {**os.environ, **env} if env else None
+    run_env = build_subprocess_env(env)
     start = time.time()
     try:
         proc = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=3600, env=run_env)

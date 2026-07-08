@@ -4,12 +4,12 @@ Playwright-Python)."""
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 import tempfile
 import time
 
 from nltest.models import Status, TestCase, TestResult
+from nltest.security import build_subprocess_env, parse_extra_args
 
 from .junit_xml import parse_junit_xml_files
 
@@ -22,8 +22,7 @@ def _node_id(test: TestCase) -> str:
 
 def build_command(tests: list[TestCase], junit_xml_path: str, extra_args: str = "", exact: bool = False) -> list[str]:
     cmd = ["pytest", "-v", f"--junitxml={junit_xml_path}"]
-    if extra_args:
-        cmd.extend(shlex.split(extra_args))
+    cmd.extend(parse_extra_args(extra_args))
     if exact:
         cmd.extend(_node_id(t) for t in tests)
     else:
@@ -54,7 +53,7 @@ def run_pytest_tests(
             shown_cmd = f"{env_prefix} {' '.join(cmd)}".strip()
             return [TestResult(test=t, status=Status.SKIPPED, message=f"[dry-run] {shown_cmd}") for t in tests]
 
-        run_env = {**os.environ, **env} if env else None
+        run_env = build_subprocess_env(env)
         start = time.time()
         try:
             proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, timeout=1800, env=run_env)
