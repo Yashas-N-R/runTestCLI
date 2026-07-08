@@ -40,10 +40,12 @@ nltest list-tags                     # see every tag/marker/group discovered
    supported framework, extracting a normalized `TestCase` for every test:
    name, file, tags/markers/groups, docstring/display name, and the
    underlying stack (Selenium / Playwright / Cypress / REST Assured / ...).
-2. **Match** — your natural-language query is tokenized, expanded with a
-   configurable synonym dictionary (e.g. "recording" ↔ "record", "capture",
-   "screencast"), and scored against each test's tags, name, description,
-   stack, and file path using exact + fuzzy matching.
+2. **Match** — your natural-language query is understood using a sentence-
+   embedding model (semantic similarity — "persist a new record" finds a
+   test tagged `save` without anyone hardcoding that they're related),
+   combined with tag/name/description/fuzzy matching for precise/exact
+   signals. There's no built-in dictionary of English synonyms to
+   maintain — see [Semantic matching](#semantic-matching-not-a-hardcoded-dictionary) below.
 3. **Run** — matched tests are grouped by framework and handed to the right
    runner (`pytest`, `npx playwright test`, `npx cypress run`, `npx jest`,
    `npx mocha`, `mvn`/Gradle for JUnit/TestNG), which is invoked with only
@@ -68,10 +70,52 @@ See [`nltest/scanners/`](nltest/scanners/) and [`nltest/runners/`](nltest/runner
 ## Installation
 
 ```bash
-pip install -e .
+pip install -e ".[semantic]"   # recommended: includes semantic (embedding) matching
+pip install -e .               # lexical/tag/fuzzy matching only, no ML dependency
 ```
 
-This installs the `nltest` command (backed by `nltest/cli.py`).
+This installs the `nltest` command (backed by `nltest/cli.py`). The `semantic`
+extra pulls in `sentence-transformers`; on first use it downloads a small
+(~90MB) embedding model from Hugging Face and caches it locally, after which
+matching works fully offline. Without it, `nltest` still works — it just
+falls back to tag/name/description/fuzzy matching (see below).
+
+## Semantic matching, not a hardcoded dictionary
+
+Earlier versions of this tool shipped a hand-maintained dictionary mapping
+words to their synonyms ("save" → "persist"/"create"/"store", "import" →
+"upload"/"ingest", ...). **That doesn't scale** — nobody can enumerate every
+synonym in English, let alone every team's own domain vocabulary, and it's a
+constant source of false positives from accidental word collisions (e.g.
+"record" meaning both *a recording* and *an employment record*).
+
+`nltest` now understands differently-worded queries using an actual
+sentence-embedding model (`nltest/matcher/semantic.py`, small MiniLM model
+via `sentence-transformers`) instead: the query and every test's
+tags/name/description are encoded into vectors, and compared by cosine
+similarity. Two phrases that mean the same thing end up close together in
+that vector space regardless of which words were used — no dictionary
+required:
+
+```bash
+$ nltest match "ingest a batch of new hires from an external file"
+# finds a test tagged `import` -- nothing in that query shares a single
+# word with "import", "csv", or "employment"
+```
+
+This is blended with (not a replacement for) tag/name/fuzzy matching — an
+exact tag match is still a very strong, cheap, reliable signal and always
+wins when both are available. Semantic matching activates automatically if
+`sentence-transformers` is installed and a model can be loaded; if not
+(dependency missing, no network on first use), `nltest` prints a one-time
+notice and degrades to lexical-only matching rather than failing. Disable it
+explicitly with `--no-semantic` or `semantic_matching: false` in
+`.nltestrc.yml`.
+
+The `synonyms:` config section still exists, but only as an **opt-in,
+per-repo escape hatch** for things a general-purpose model has no way to
+know — an internal codename, house terminology, an acronym specific to your
+company — not as nltest's own understanding of English.
 
 ## Usage
 
@@ -89,6 +133,7 @@ nltest run "test recording" --extra-args="-x"  # forwarded to the underlying run
 nltest run "test recording" --exact            # only run matched tests, not whole files/classes
 nltest run "test recording" --no-deps          # don't auto-include declared dependencies
 nltest run "test recording" --no-ci-order      # ignore CI pipeline staging, use match-score order
+nltest run "test recording" --no-semantic      # disable embedding-based matching, tag/name/fuzzy only
 nltest --repo /path/to/other/repo run "smoke test checkout"
 ```
 
@@ -357,12 +402,14 @@ exclude_dirs:
   - fixtures
   - __snapshots__
 
+# Opt-in aliases for things a semantic model has no way to know (an internal
+# codename, house terminology) -- not a general English dictionary.
 synonyms:
-  recording:
-    - screencast
-    - screen-capture
+  checkout:
+    - buy-now
 
-match_threshold: 0.35   # 0.0 (loose) - 1.0 (strict)
+semantic_matching: true   # embedding-based understanding of differently-worded queries
+match_threshold: 0.35     # 0.0 (loose) - 1.0 (strict)
 max_matches: 200
 ```
 
@@ -389,7 +436,7 @@ login/checkout/search tests.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]"   # includes sentence-transformers for semantic-matching tests
 pytest tests/
 ```
 
@@ -409,7 +456,8 @@ nltest/
     java_scanner.py      # JUnit / TestNG / Selenium / REST Assured, via regex
     context.py            # shared: file-level comments + locally-imported helper file content
   matcher/         # NL query -> ranked TestCase[]
-    nlp.py               # tokenization, concept/synonym grouping, gerund normalization, fuzzy scoring
+    semantic.py           # optional embedding-based semantic similarity (sentence-transformers)
+    nlp.py                # tokenization, gerund normalization, opt-in synonym aliases, fuzzy scoring
     intent.py             # compound-query decomposition into ordered clauses (after/before/then)
     dependencies.py       # resolves TestNG/pytest-dependency/comment-based test dependencies
   runners/         # TestCase[] -> shell command -> TestResult[]

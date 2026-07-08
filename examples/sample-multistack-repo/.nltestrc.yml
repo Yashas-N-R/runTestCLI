@@ -6,15 +6,22 @@ exclude_dirs:
   - fixtures
   - __snapshots__
 
-# Extend the built-in synonym dictionary with domain-specific vocabulary.
-# Keys are canonical concepts; values are alternate words/phrases users might
-# say that should also match tests tagged/named with the canonical concept.
+# nltest has NO built-in dictionary of English synonyms -- differently-worded
+# queries ("save" vs "persist", "import" vs "bulk upload a csv") are
+# understood via semantic embeddings (see semantic_matching below), not a
+# hardcoded word list. This `synonyms:` section is only for pinning
+# deterministic, repo-specific aliases on top of that -- e.g. an internal
+# codename or house terminology that even a semantic model wouldn't know to
+# associate with the real feature name.
 synonyms:
-  recording:
-    - screencast
-    - screen-capture
   checkout:
-    - buy-now
+    - buy-now  # this team's internal name for the checkout flow
+
+# Semantic (embedding-based) matching is on by default; it activates
+# automatically if the optional `sentence-transformers` package is
+# installed (`pip install nltest[semantic]`) and degrades gracefully to
+# tag/name/fuzzy matching otherwise. Set to false to disable it outright.
+semantic_matching: true
 
 # Lower this to broaden matches (more recall, more false positives), or raise
 # it to be stricter (fewer, more precise matches). Range: 0.0 - 1.0.

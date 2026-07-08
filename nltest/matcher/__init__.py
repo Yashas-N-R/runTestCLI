@@ -6,6 +6,7 @@ from __future__ import annotations
 from nltest.config import NLTestConfig
 from nltest.models import MatchResult, TestCase
 
+from . import semantic
 from .dependencies import expand_with_dependencies
 from .nlp import expand_query_tokens, group_query_concepts, score_test, tokenize
 
@@ -16,7 +17,15 @@ __all__ = [
     "group_query_concepts",
     "score_test",
     "expand_with_dependencies",
+    "semantic",
 ]
+
+SEMANTIC_SIMILARITY_THRESHOLD = 0.4
+"""Cosine similarities below this are treated as noise. Empirically, with
+the default MiniLM model, unrelated short phrases score ~0.0-0.3 (generic
+words like "test"/"case" shared between unrelated sentences can nudge this
+up), while genuinely related phrases ("importing" vs. a test tagged
+"import") score ~0.4+."""
 
 
 def _apply_feature_map(query: str, tests: list[TestCase], config: NLTestConfig, existing_ids: set[str]) -> list[MatchResult]:
@@ -58,9 +67,22 @@ def score_matches(query: str, tests: list[TestCase], config: NLTestConfig) -> li
     query_tokens = tokenize(query)
     concepts = group_query_concepts(query_tokens, config.synonyms)
 
+    semantic_scores: list[float | None] = [None] * len(tests)
+    if config.semantic_matching:
+        corpus_embeddings = semantic.embed_corpus_cached([t.semantic_text() for t in tests])
+        sims = semantic.similarities(query, corpus_embeddings)
+        if sims is not None:
+            semantic_scores = [s if s >= SEMANTIC_SIMILARITY_THRESHOLD else 0.0 for s in sims]
+
     results: list[MatchResult] = []
-    for test in tests:
-        score, matched_on = score_test(concepts, test, include_body=config.search_body)
+    for test, sem_score in zip(tests, semantic_scores):
+        lexical_score, matched_on = score_test(concepts, test, include_body=config.search_body)
+
+        score = lexical_score
+        if sem_score is not None and sem_score > lexical_score:
+            score = sem_score
+            matched_on = matched_on + [f"semantic:{sem_score:.2f}"]
+
         if score >= config.match_threshold:
             results.append(MatchResult(test=test, score=score, matched_on=matched_on))
 

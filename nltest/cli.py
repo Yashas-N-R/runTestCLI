@@ -10,7 +10,7 @@ from rich.console import Console
 
 from nltest.ci_order import group_by_stage, load_order_rules, order_matches
 from nltest.config import NLTestConfig
-from nltest.matcher import augment_matches, match_query, score_matches
+from nltest.matcher import augment_matches, match_query, score_matches, semantic
 from nltest.models import RunReport
 from nltest.report import print_console_report, print_matches_preview, write_html_report, write_json_report
 from nltest.runners import run_matches
@@ -55,6 +55,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Don't reorder/stage execution based on the repo's CI pipeline YAML "
         "(.github/workflows, .gitlab-ci.yml, etc.) -- run in match-score order instead",
+    )
+    run_p.add_argument(
+        "--no-semantic",
+        action="store_true",
+        help="Disable embedding-based semantic matching, using only tag/name/fuzzy matching",
     )
 
     index_p = sub.add_parser("index", help="Scan the repo and list all discovered test cases")
@@ -120,6 +125,8 @@ def cmd_match(args: argparse.Namespace) -> int:
     config = NLTestConfig.load(args.repo)
     if args.threshold is not None:
         config.match_threshold = args.threshold
+    if config.semantic_matching:
+        semantic.warn_if_unavailable(console.print)
     tests = scan_repo(config)
     matches = match_query(args.query, tests, config)
     report = RunReport(query=args.query, matches=matches, dry_run=True)
@@ -135,6 +142,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         config.include_dependencies = False
     if args.no_ci_order:
         config.respect_ci_order = False
+    if args.no_semantic:
+        config.semantic_matching = False
+    if config.semantic_matching:
+        semantic.warn_if_unavailable(console.print)
 
     console.print(f'[bold]Scanning repo:[/bold] {config.repo_root}')
     tests = scan_repo(config)

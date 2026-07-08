@@ -215,11 +215,13 @@ def _field_tokens(test: TestCase, field_name: str) -> set[str]:
         text = test.file_context
     else:
         text = ""
-    base_tokens = tokenize(text, drop_stopwords=(field_name in ("body", "file_context")))
-    enriched: set[str] = set()
-    for token in base_tokens:
-        enriched.update(word_variants(token))
-    return enriched
+    # Deliberately NOT enriched with word_variants() here: the repo's own
+    # text is whatever form it naturally is (a tag like "import_data" already
+    # contains "import" literally), and expanding it with morphological
+    # guesses only adds noise (e.g. "recording" -> "record" bleeding into
+    # unrelated "employment record" queries). Gerund normalization matters
+    # on the QUERY side (see `group_query_concepts`), not here.
+    return set(tokenize(text, drop_stopwords=(field_name in ("body", "file_context"))))
 
 
 WEAK_MATCH_CREDIT = 0.2

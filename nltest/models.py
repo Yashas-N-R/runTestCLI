@@ -91,6 +91,18 @@ class TestCase:
         ]
         return " ".join(p for p in parts if p)
 
+    def semantic_text(self) -> str:
+        """Natural-language-ish text for embedding-based semantic matching --
+        deliberately excludes file_path (path fragments are structural, not
+        meaningful phrases an embedding model benefits from)."""
+        parts = [
+            " ".join(self.tags),
+            self.name.replace("_", " "),
+            self.description,
+            self.stack.value,
+        ]
+        return ". ".join(p for p in parts if p)
+
 
 @dataclass
 class MatchResult:

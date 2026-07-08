@@ -25,34 +25,20 @@ DEFAULT_EXCLUDE_DIRS = {
     ".vscode",
 }
 
-# Built-in synonym map: NL words -> canonical keywords that may appear as tags,
-# test names, or descriptions. Repo configs can extend/override this.
-DEFAULT_SYNONYMS: dict[str, list[str]] = {
-    # Deliberately does NOT include the bare word "record" -- it's too
-    # ambiguous (a video *recording* vs. a database *record*/employment
-    # *record*) and caused false positives against unrelated "employee
-    # record"-style features in practice.
-    "recording": ["recorder", "capture", "screen-record", "screen-recording"],
-    "login": ["signin", "sign-in", "auth", "authentication", "logon"],
-    "logout": ["signout", "sign-out"],
-    "checkout": ["payment", "purchase", "order"],
-    "cart": ["basket", "shopping-cart"],
-    "search": ["find", "query", "lookup"],
-    "upload": ["attach"],
-    "download": ["export"],
-    "signup": ["register", "registration", "sign-up"],
-    "profile": ["account", "settings", "preferences"],
-    "notification": ["notify", "alert", "push"],
-    "api": ["rest", "endpoint", "service"],
-    "smoke": ["sanity"],
-    "regression": ["full", "complete"],
-    "import": ["bulk-import", "csv-import", "ingest"],
-    "export": ["download", "extract"],
-    "save": ["create", "persist", "submit", "add", "store"],
-    "delete": ["remove", "destroy"],
-    "update": ["edit", "modify", "change"],
-    "employment": ["employee", "employment-record", "hr-record"],
-}
+# Deliberately EMPTY. Earlier versions shipped a hardcoded dictionary of
+# English word relationships ("save" -> "persist"/"create"/"store", "import"
+# -> "upload"/"ingest", etc.) -- that approach doesn't scale (nobody can
+# hand-enumerate every synonym in English, let alone every team's own
+# domain vocabulary) and caused real false positives from accidental word
+# collisions (e.g. "record" meaning both "a recording" and "an employment
+# record"). Understanding that "save" and "persist" mean the same thing is
+# now handled by actual semantic understanding -- see `matcher/semantic.py`,
+# which uses a sentence-embedding model instead of a lookup table. This dict
+# remains available purely as an opt-in, per-repo override (`.nltestrc.yml`
+# `synonyms:`) for teams who want to pin specific deterministic aliases
+# (e.g. an internal codename) on top of that, not as nltest's own
+# understanding of English.
+DEFAULT_SYNONYMS: dict[str, list[str]] = {}
 
 
 @dataclass
@@ -69,6 +55,13 @@ class NLTestConfig:
     search_body: bool = True
     """Also match against test source code (not just title/tags/docstring).
     Turn off for very large repos if scanning/matching becomes slow."""
+
+    semantic_matching: bool = True
+    """Use a sentence-embedding model (if the optional `sentence-transformers`
+    dependency is installed) to understand differently-worded queries for the
+    same feature ("save" / "persist" / "store a new record") without a
+    hardcoded synonym dictionary. Degrades gracefully to lexical/tag/fuzzy
+    matching if the dependency isn't installed or a model can't be loaded."""
 
     include_dependencies: bool = True
     """Automatically pull in tests that a matched test explicitly depends on
@@ -124,6 +117,8 @@ class NLTestConfig:
             self.run_overrides.update(data["run_overrides"])
         if "search_body" in data:
             self.search_body = bool(data["search_body"])
+        if "semantic_matching" in data:
+            self.semantic_matching = bool(data["semantic_matching"])
         if "include_dependencies" in data:
             self.include_dependencies = bool(data["include_dependencies"])
         if "respect_ci_order" in data:
