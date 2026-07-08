@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nltest"
+version = "0.1.0"
+description = "Run automation test suites (Selenium, Playwright, Cypress, REST Assured, and more) using plain English commands."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "nltest contributors" }]
+dependencies = [
+    "PyYAML>=6.0",
+    "rapidfuzz>=3.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+semantic = [
+    "sentence-transformers>=3.0.0",
+]
+
+[project.scripts]
+nltest = "nltest.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["nltest*"]
