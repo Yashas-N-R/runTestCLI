@@ -85,7 +85,7 @@ Do **not** open public issues for unfixed exploit details.
 ## Recommended usage in sensitive environments
 
 ```bash
-pip install nltest
+pip install nl-test
 cd your-trusted-test-repo
 nltest run "smoke test login" --dry-run   # inspect before running
 nltest run "smoke test login" -y

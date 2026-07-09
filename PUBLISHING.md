@@ -3,13 +3,13 @@
 End users install with:
 
 ```bash
-pip install nltest
+pip install nl-test
 ```
 
 ## One-time setup
 
 1. Create an account at https://pypi.org
-2. Create an API token (scope: entire account or project `nltest`)
+2. Create an API token (scope: entire account or project `nl-test`)
 3. In GitHub repo **Settings → Secrets → Actions**, add `PYPI_API_TOKEN`
 4. Create a GitHub **Environment** named `pypi` (optional but recommended) and require approval for publishes
 
@@ -28,7 +28,7 @@ Or run manually: **Actions → Publish to PyPI → Run workflow**
 pip install build huggingface_hub
 python scripts/bundle_embedding_model.py
 python -m build
-pip install dist/nltest-*.whl
+pip install dist/nl_test-*.whl
 nltest --help
 ```
 

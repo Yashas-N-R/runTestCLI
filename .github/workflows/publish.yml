@@ -21,7 +21,7 @@ jobs:
 
       - name: Install build tooling
         run: |
-          python -m pip install --upgrade pip build huggingface_hub
+          python -m pip install --upgrade pip build huggingface_hub "packaging>=26.0"
 
       - name: Bundle offline embedding model into the wheel
         run: python scripts/bundle_embedding_model.py

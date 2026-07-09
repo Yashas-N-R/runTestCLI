@@ -70,7 +70,7 @@ See [`nltest/scanners/`](nltest/scanners/) and [`nltest/runners/`](nltest/runner
 ## Installation
 
 ```bash
-pip install nltest
+pip install nl-test
 ```
 
 That's it — the `nltest` command is installed with semantic matching built in.

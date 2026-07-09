@@ -9,7 +9,7 @@ model and compares them by cosine similarity. Two phrases that mean the same
 thing end up close together in that vector space regardless of which words
 were used, without anyone having to enumerate the relationship.
 
-The PyPI wheel bundles the MiniLM model locally so ``pip install nltest`` works
+The PyPI wheel bundles the MiniLM model locally so ``pip install nl-test`` works
 fully offline with no Hugging Face download. Set ``NLTEST_ALLOW_NETWORK=1``
 only if you need to fetch a custom model via ``NLTEST_EMBEDDING_MODEL``.
 """
