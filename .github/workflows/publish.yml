@@ -11,7 +11,6 @@ permissions:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    environment: pypi
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +20,7 @@ jobs:
 
       - name: Install build tooling
         run: |
-          python -m pip install --upgrade pip build huggingface_hub "packaging>=26.0"
+          python -m pip install --upgrade pip build twine huggingface_hub "packaging>=26.0"
 
       - name: Bundle offline embedding model into the wheel
         run: python scripts/bundle_embedding_model.py
@@ -29,7 +28,11 @@ jobs:
       - name: Build wheel and sdist
         run: python -m build
 
+      - name: Verify distributions
+        run: python -m twine check dist/*
+
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload dist/*
