@@ -95,8 +95,11 @@ def scan_java(config: NLTestConfig) -> list[TestCase]:
         if not (base.endswith("Test.java") or base.endswith("Tests.java") or base.startswith("Test")):
             continue
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-                source = fh.read()
+            from nltest.security import safe_read_text
+
+            source = safe_read_text(path, config.repo_root)
+            if source is None:
+                continue
         except (UnicodeDecodeError, OSError):
             continue
 
@@ -109,7 +112,9 @@ def scan_java(config: NLTestConfig) -> list[TestCase]:
         framework = _detect_framework(source)
         rel_path = os.path.relpath(path, config.repo_root)
         lines = source.splitlines()
-        file_context = build_file_context(source, "java", filename_index) if config.search_body else ""
+        file_context = (
+            build_file_context(source, "java", filename_index, config.repo_root) if config.search_body else ""
+        )
 
         for m in METHOD_RE.finditer(source):
             annotations = m.group("annotations")

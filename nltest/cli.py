@@ -16,6 +16,7 @@ from nltest.report import print_console_report, print_matches_preview, write_htm
 from nltest.runners import run_matches
 from nltest.scanners import scan_repo
 from nltest.scenario import resolve_scenario
+from nltest.security import SecurityError, validate_output_path
 
 console = Console()
 
@@ -249,11 +250,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     print_console_report(report, console)
 
     if args.json_out:
-        write_json_report(report, args.json_out)
-        console.print(f"[dim]JSON report written to {args.json_out}[/dim]")
+        json_path = validate_output_path(args.json_out)
+        write_json_report(report, json_path)
+        console.print(f"[dim]JSON report written to {json_path}[/dim]")
     if args.html_out:
-        write_html_report(report, args.html_out)
-        console.print(f"[dim]HTML report written to {args.html_out}[/dim]")
+        html_path = validate_output_path(args.html_out)
+        write_html_report(report, html_path)
+        console.print(f"[dim]HTML report written to {html_path}[/dim]")
 
     if args.dry_run:
         return 0
@@ -273,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     handler = handlers[args.command]
     try:
         return handler(args)
+    except SecurityError as exc:
+        console.print(f"[red]Security error:[/red] {exc}")
+        return 2
+    except ValueError as exc:
+        console.print(f"[red]Configuration error:[/red] {exc}")
+        return 2
     except KeyboardInterrupt:
         console.print("\n[red]Interrupted.[/red]")
         return 130

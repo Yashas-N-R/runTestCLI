@@ -123,8 +123,11 @@ def scan_js(config: NLTestConfig) -> list[TestCase]:
         if not is_test_file:
             continue
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-                source = fh.read()
+            from nltest.security import safe_read_text
+
+            source = safe_read_text(path, config.repo_root)
+            if source is None:
+                continue
         except (UnicodeDecodeError, OSError):
             continue
 
@@ -132,7 +135,9 @@ def scan_js(config: NLTestConfig) -> list[TestCase]:
         rel_path = os.path.relpath(path, config.repo_root)
         lines = source.splitlines()
         language = "javascript" if path.endswith((".js", ".jsx", ".mjs", ".cjs")) else "typescript"
-        file_context = build_file_context(source, language, filename_index) if config.search_body else ""
+        file_context = (
+            build_file_context(source, language, filename_index, config.repo_root) if config.search_body else ""
+        )
 
         # Track the nearest enclosing describe() block title (best-effort, by
         # scanning describes/its in source order and using indentation-free

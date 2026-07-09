@@ -114,8 +114,11 @@ def scan_python(config: NLTestConfig) -> list[TestCase]:
         if not (base.startswith("test_") or base.endswith("_test.py") or "test" in base.lower()):
             continue
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-                source = fh.read()
+            from nltest.security import safe_read_text
+
+            source = safe_read_text(path, config.repo_root)
+            if source is None:
+                continue
             tree = ast.parse(source, filename=path)
         except (SyntaxError, UnicodeDecodeError, ValueError):
             continue
@@ -124,7 +127,9 @@ def scan_python(config: NLTestConfig) -> list[TestCase]:
         stack = _detect_stack(source)
         framework = _detect_framework(source, stack)
         rel_path = os.path.relpath(path, config.repo_root)
-        file_context = build_file_context(source, "python", filename_index) if config.search_body else ""
+        file_context = (
+            build_file_context(source, "python", filename_index, config.repo_root) if config.search_body else ""
+        )
 
         def collect_from_func(node: ast.FunctionDef | ast.AsyncFunctionDef, class_name: str | None):
             if not node.name.startswith("test"):

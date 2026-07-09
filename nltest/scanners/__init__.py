@@ -6,6 +6,7 @@ import os
 
 from nltest.config import NLTestConfig
 from nltest.models import TestCase
+from nltest.security import is_sensitive_filename, reset_scan_budget
 
 from .java_scanner import scan_java
 from .js_scanner import scan_js
@@ -16,13 +17,15 @@ ALL_SCANNERS = (scan_python, scan_js, scan_java)
 
 def iter_source_files(config: NLTestConfig, extensions: tuple[str, ...]) -> list[str]:
     """Walk the repo root, returning absolute paths of files matching extensions,
-    while skipping excluded directories."""
+    while skipping excluded directories and sensitive credential files."""
     roots = [os.path.join(config.repo_root, d) for d in config.include_dirs] or [config.repo_root]
     found: list[str] = []
     for root in roots:
-        for dirpath, dirnames, filenames in os.walk(root):
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
             dirnames[:] = [d for d in dirnames if d not in config.exclude_dirs and not d.startswith(".")]
             for fname in filenames:
+                if is_sensitive_filename(fname):
+                    continue
                 if fname.endswith(extensions):
                     found.append(os.path.join(dirpath, fname))
     return sorted(found)
@@ -30,6 +33,7 @@ def iter_source_files(config: NLTestConfig, extensions: tuple[str, ...]) -> list
 
 def scan_repo(config: NLTestConfig) -> list[TestCase]:
     """Run every scanner over the repo and return the combined list of test cases."""
+    reset_scan_budget()
     all_tests: list[TestCase] = []
     for scanner in ALL_SCANNERS:
         all_tests.extend(scanner(config))

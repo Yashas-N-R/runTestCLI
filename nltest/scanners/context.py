@@ -84,7 +84,9 @@ def build_filename_index(paths: list[str]) -> dict[str, str]:
     return index
 
 
-def resolve_local_imports(source: str, language: str, filename_index: dict[str, str]) -> str:
+def resolve_local_imports(
+    source: str, language: str, filename_index: dict[str, str], repo_root: str
+) -> str:
     """Best-effort: find names locally imported by this file, look them up in
     `filename_index`, and return a snippet of each match's content. Only
     names that resolve to an actual file already discovered in this repo are
@@ -105,8 +107,12 @@ def resolve_local_imports(source: str, language: str, filename_index: dict[str, 
         if not match_path:
             continue
         try:
-            with open(match_path, "r", encoding="utf-8", errors="ignore") as fh:
-                snippets.append(fh.read(MAX_IMPORT_CONTENT))
+            from nltest.security import safe_read_text
+
+            content = safe_read_text(match_path, repo_root)
+            if content is None:
+                continue
+            snippets.append(content[:MAX_IMPORT_CONTENT])
         except OSError:
             continue
         followed += 1
@@ -114,7 +120,7 @@ def resolve_local_imports(source: str, language: str, filename_index: dict[str, 
     return "\n".join(snippets)
 
 
-def build_file_context(source: str, language: str, filename_index: dict[str, str]) -> str:
+def build_file_context(source: str, language: str, filename_index: dict[str, str], repo_root: str) -> str:
     """Convenience: file-level comments + locally-imported helper content."""
     if language == "python":
         comments = extract_python_comments(source)
@@ -122,5 +128,5 @@ def build_file_context(source: str, language: str, filename_index: dict[str, str
         comments = extract_c_style_comments(source)
     else:
         comments = ""
-    imported = resolve_local_imports(source, language, filename_index)
+    imported = resolve_local_imports(source, language, filename_index, repo_root)
     return "\n".join(part for part in (comments, imported) if part)

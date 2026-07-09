@@ -8,3 +8,6 @@ build/
 dist/
 .DS_Store
 *.log
+
+# Bundled embedding model (downloaded at wheel build time, not committed)
+nltest/bundled_models/all-MiniLM-L6-v2/

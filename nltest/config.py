@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from nltest.security import resolve_repo_root, safe_repo_path
+
 DEFAULT_CONFIG_NAMES = (".nltestrc.yml", ".nltestrc.yaml", "nltest.config.yml")
 
 DEFAULT_EXCLUDE_DIRS = {
@@ -23,6 +25,11 @@ DEFAULT_EXCLUDE_DIRS = {
     "coverage",
     ".idea",
     ".vscode",
+    # Credential / secret stores — never scanned even if misnamed as tests.
+    ".aws",
+    ".ssh",
+    ".gnupg",
+    "secrets",
 }
 
 # Deliberately EMPTY. Earlier versions shipped a hardcoded dictionary of
@@ -49,8 +56,6 @@ class NLTestConfig:
     synonyms: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_SYNONYMS))
     match_threshold: float = 0.35
     max_matches: int = 200
-    run_overrides: dict[str, str] = field(default_factory=dict)
-    """Framework name -> shell command template override."""
 
     search_body: bool = True
     """Also match against test source code (not just title/tags/docstring).
@@ -90,7 +95,7 @@ class NLTestConfig:
 
     @classmethod
     def load(cls, repo_root: str) -> "NLTestConfig":
-        cfg = cls(repo_root=os.path.abspath(repo_root))
+        cfg = cls(repo_root=resolve_repo_root(repo_root))
         for name in DEFAULT_CONFIG_NAMES:
             path = os.path.join(cfg.repo_root, name)
             if os.path.isfile(path):
@@ -104,7 +109,9 @@ class NLTestConfig:
         if "exclude_dirs" in data:
             self.exclude_dirs |= set(data["exclude_dirs"])
         if "include_dirs" in data:
-            self.include_dirs = list(data["include_dirs"])
+            self.include_dirs = [
+                os.path.relpath(safe_repo_path(self.repo_root, d), self.repo_root) for d in data["include_dirs"]
+            ]
         if "synonyms" in data:
             for canonical, words in data["synonyms"].items():
                 self.synonyms.setdefault(canonical, [])
@@ -114,7 +121,12 @@ class NLTestConfig:
         if "max_matches" in data:
             self.max_matches = int(data["max_matches"])
         if "run_overrides" in data:
-            self.run_overrides.update(data["run_overrides"])
+            # Disabled for security: arbitrary shell command templates would
+            # let a malicious .nltestrc.yml execute anything in the repo context.
+            raise ValueError(
+                "run_overrides in .nltestrc.yml is not supported (removed for security). "
+                "Use --extra-args on the CLI instead."
+            )
         if "search_body" in data:
             self.search_body = bool(data["search_body"])
         if "semantic_matching" in data:
